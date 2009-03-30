@@ -45,10 +45,9 @@ __all__ = [
 	'grep',
 	'reduce',
 	'apply',
-	'cut',
 	'flatten',
 	'alternate',
-	'zipwith',
+	'zip',
 	'tee',
 	'prepend',
 	'append',
@@ -86,12 +85,11 @@ class Stream(object):
 	>>> s >> next
 	3
 	"""
-	__slots__ = 'iterator', '_repr'
+	__slots__ = 'iterator',
 
 	def __init__(self, iterable=None):
 		"""Make a stream object from an iterable"""
 		self.iterator = iter(iterable if iterable else [])
-		self._repr = 'Stream(%s)' % repr(self.iterator)
 
 	def __iter__(self):
 		return self.iterator
@@ -104,12 +102,10 @@ class Stream(object):
 
 	def __pipe__(self, inpipe):
 		self.iterator = self.__call__(inpipe)
-		self._repr = Stream.__connect_repr(inpipe, self)
 		return self
 
 	def __extend__(self, inpipe):
 		inpipe.iterator = self.__call__(inpipe)
-		inpipe._repr = Stream.__connect_repr(inpipe, self)
 		return inpipe
 
 	def __rshift__(self, other):
@@ -121,46 +117,37 @@ class Stream(object):
 	@staticmethod
 	def __pipe(left, right):
 		# Implement the overloading of  the operator '>>'
-		try:
+		if hasattr(right, '__pipe__'):
 			func = right.__pipe__
-		except AttributeError:
-			try:
-				func = right.__call__
-			except AttributeError:			### no connection mechanism exists
-				return Stream(right)
+		elif hasattr(right, '__call__'):
+			func = right.__call__
+		else:						### no connection mechanism exists
+			return right if isinstance(right, Stream) else Stream(right)
 		return func(left)
 
 	def __lshift__(self, other):
 		return Stream.__extend(self, other)
 
-	def __rlshift__(self, other):
-		return Stream.__extend(other, self)
-
 	@staticmethod
 	def __extend(left, right):
 		# Implement the overloading of  the operator '<<'
-		try:
+		if hasattr(right, '__extend__'):
 			func = right.__extend__
-		except AttributeError:				### no connection mechanism exists
+		else:						### no connection mechanism exists
 			return right if isinstance(right, Stream) else Stream(right)
-		if not isinstance(left, Stream):
-			left = Stream(left)
 		return func(left)
 
 	def __repr__(self):
-		return self._repr
-
-	@staticmethod
-	def __connect_repr(left, right):
-		lrepr = left._repr if isinstance(left, Stream) else repr(left)
-		rrepr = right._repr if isinstance(right, Stream) else repr(right)
-		return lrepr + ' >> '  + rrepr
+		return 'Stream(%s)' % repr(self.iterator)
 
 
 #_______________________________________________________________________
 #
 # Simple taking and dropping elements
 #_______________________________________________________________________
+
+
+negative = lambda x: x and x<0		### since None < 0 == True
 
 
 class take(Stream):
@@ -178,12 +165,12 @@ class take(Stream):
 	def __init__(self, *args):
 		self.iterator = iter([])
 		self.slice = slice(*args)
-		self._repr = 'take(%s)' % repr(self.slice)
 
 	def __call__(self, inpipe):
-		## None < 0 == True ##
-		if (self.slice.stop is None and self.slice.step > 0) \
-		or (self.slice.start is None and self.slice.step and self.slice.step < 0):
+		if negative(self.slice.stop) or negative(self.slice.start) \
+		or not (self.slice.start or self.slice.stop) \
+		or (not self.slice.start and negative(self.slice.step)) \
+		or not (self.slice.stop or negative(self.slice.step)):
 			self.cache = list(inpipe)		## force all evaluation 	##
 		else:							## force some evaluation ##
 			if not self.slice.step or self.slice.step > 0:
@@ -191,19 +178,23 @@ class take(Stream):
 			else:
 				stop = self.slice.start
 			i = iter(inpipe)
-			self.cache =  [next(i) for _ in xrange(stop)]
+			try:
+				self.cache =  [next(i) for _ in xrange(stop)]
+			except StopIteration:
+				pass
 		self.cache = self.cache[self.slice]
 		return iter(self.cache)
 
 	def __pipe__(self, inpipe):
 		self.iterator = self.__call__(inpipe)
-		self._repr = 'Stream(%s)' % repr(self.cache)
 		return self
 
 	def __extend__(self, inpipe):
 		inpipe.iterator = self.__call__(inpipe)
-		inpipe._repr = 'Stream(%s)' % repr(self.cache)
 		return inpipe
+
+	def __repr__(self):
+		return 'Stream(%s)' % repr(self.cache)
 
 
 class itemgetter(take):
@@ -217,7 +208,6 @@ class itemgetter(take):
 
 	def __init__(self):
 		self.iterator = iter([])
-		self._repr = '<itemgetter at %s>' % hex(id(self))
 		self.get1 = False
 
 	@classmethod
@@ -237,6 +227,9 @@ class itemgetter(take):
 		else:
 			return self.cache
 
+	def __repr__(self):
+		return '<itemgetter at %s>' % hex(id(self))
+
 item = itemgetter()
 
 
@@ -251,13 +244,12 @@ class takei(Stream):
 	"""
 	__slots__ = 'indexiter',
 
-	def __init__(self, indexes):
+	def __init__(self, indices):
 		"""indexes should be non-negative integers in monotonically
 		increasing order (bad values won't yield)
 		"""
 		self.iterator = iter([])
-		self.indexiter = iter(indexes)
-		self._repr = 'takei(' + repr(indexes) + ')'
+		self.indexiter = iter(indices)
 
 	def __call__(self, other):
 		def genfunc():
@@ -267,7 +259,7 @@ class takei(Stream):
 			counter = seq()
 			while 1:
 				c = next(counter)
-				elem = i.next()
+				elem = next(i)
 				while idx <= old_idx:		# ignore bad values
 					idx = next(self.indexiter)
 				if c == idx:
@@ -291,15 +283,14 @@ class dropi(Stream):
 	"""
 	__slot__ = 'indexiter'
 
-	def __init__(self, indexes):
+	def __init__(self, indices):
 		"""indexes: a stream of the indexs of element to be selected.
 
 		indexes should be non-negative integers in monotonically
 		increasing order (bad values won't be discarded)
 		"""
 		self.iterator = iter([])
-		self.indexiter = iter(indexes)
-		self._repr = 'dropi(' + repr(indexes) + ')'
+		self.indexiter = iter(indices)
 
 	def __call__(self, other):
 		def genfunc():
@@ -346,7 +337,6 @@ class dropv(Stream):
 		"""
 		self.iterator = iter([])
 		self.valueiter = iter(values)
-		self._repr = 'dropv(' + repr(values) + ')'
 
 	def __call__(self, other):
 		def genfunc():
@@ -375,13 +365,20 @@ class FunctionFilter(Stream):
 	__slots__ = 'function',
 
 	def __init__(self, function):
-		try:
-			function.__call__
-		except AttributeError:
-			raise TypeError('function is not callable')
+		if not hasattr(function, '__call__'):
+			raise TypeError("'%s' object is not callable" % function)
 		self.iterator = iter([])
 		self.function = function
-		self._repr = repr(function)
+
+
+class apply(FunctionFilter):
+	"""itertools.starmap"""
+	pass
+
+
+class count(apply):
+	"""Count the number of elements of a stream"""
+	pass
 
 
 class map(FunctionFilter):
@@ -390,12 +387,6 @@ class map(FunctionFilter):
 	>>> xrange(1,50,7) >> map(lambda x: x**2) >> list
 	[1, 64, 225, 484, 841, 1296, 1849]
 	"""
-	__slots__ = 'function',
-
-	def __init__(self, function):
-		super(map, self).__init__(function)
-		self._repr = 'map(%s)' % repr(function)
-
 	def __call__(self, other):
 		return itertools.imap(self.function, other)
 
@@ -409,8 +400,10 @@ class filter(FunctionFilter):
 	[4, 10, 16, 22, 28, 34]
 	"""
 	def __init__(self, function=None):
-		super(filter, self).__init__(function)
-		self._repr = 'filter(%s)' % repr(function)
+		try:
+			super(filter, self).__init__(function)
+		except TypeError:
+			pass
 
 	def __call__(self, other):
 		return itertools.ifilter(self.function, other)
@@ -430,10 +423,6 @@ class grep(filter):
 
 class reduce(FunctionFilter):
 	"""Haskell's scanl"""
-	def __init__(self, function=None):
-		super(reduce, self).__init__(function)
-		self._repr = 'reduce(%s)' + repr(function)
-
 	def __call__(self, other):
 		def genfunc():
 			i = other.iterator
@@ -455,11 +444,6 @@ class prepend(Stream):
 	>>> seq(7, 7) >> prepend(xrange(0, 10, 2)) >> item[:10]
 	[0, 2, 4, 6, 8, 7, 14, 21, 28, 35]
 	"""
-	def __init__(self, iterable):
-		"""iterable: stream to be prepended"""
-		self.iterator = iter(iterable if iterable else [])
-		self._repr = 'prepend' + repr(self.iterator)
-
 	def __call__(self, inpipe):
 		"""Prepend at the beginning of other"""
 		if self.iterator:
@@ -474,11 +458,6 @@ class append(Stream):
 	>>> xrange(1, 20, 7) >> append(xrange(1, 10, 3)) >> append('foo') >> list
 	[1, 8, 15, 1, 4, 7, 'f', 'o', 'o']
 	"""
-	def __init__(self, iterable):
-		"""iterable: streams to be appended"""
-		self.iterator = iter(iterable if iterable else [])
-		self._repr = 'append' + repr(self.iterator)
-
 	def __call__(self, inpipe):
 		if self.iterator:
 			return itertools.chain(iter(inpipe), self.iterator)
@@ -493,7 +472,7 @@ class tee(Stream):
 
 	def __init__(self, streamobj):
 		self.streamobj = streamobj
-		self._repr = 'tee(%s)' % repr(streamobj)
+		self.iterator = iter([])
 
 	def __pipe__(self, inpipe):
 		"""Modify streamobj to refer to a copy of iterable.
@@ -501,64 +480,51 @@ class tee(Stream):
 		"""
 		inpipe.iterator, self.streamobj.iterator = itertools.tee(inpipe)
 		if isinstance(inpipe, Stream):
-			self.streamobj._repr = inpipe._repr
 			return inpipe
 		else:
-			self.streamobj._repr = repr(inpipe)
 			return Stream(inpipe)
 
 
 class alternate(Stream):
-	"""The simplest of all merge"""
 	pass
 
 
-class zipwith(Stream):
+class zip(Stream):
 	pass
 
 
 #_______________________________________________________________________
 #
 # Nested streams processing
-#_____________________________________________________________________
+#_______________________________________________________________________
 
 
-class apply(Stream):
-	"""itertools.starmap"""
-	pass
-
-
-class cut(Stream):
-	"""UNIX cut"""
-	pass
-
-
-class flatten(Stream):
-	"""Flatten a nested stream nonrecursively"""
-	def __init__(self):
-		self._repr = '<flatten at %s>' % hex(id(self))
-
+class flattener(Stream):
+	"""Flatten a nested stream of arbitrary depth"""
 	@staticmethod
 	def __call__(inpipe):
 		def genfunc():
-			flatlist = Stream(inpipe)
+			stack = []
+			i = iter(inpipe)
 			while 1:
-				inner = flatlist >> next
-				if type(inner) != type(''):
+				try:
+					e = next(i)
+					if hasattr(e, "__iter__") and not isinstance(e, basestring):
+						stack.append(i)
+						i = iter(e)
+					else:
+						yield e
+				except StopIteration:
 					try:
-						flatlist << prepend(inner)
-					except TypeError:	### not an iterable
-						yield inner
-				else:
-					yield inner
+						i = stack.pop()
+					except IndexError:
+						return
 		return genfunc()
 
-flatten = flatten()
+	def __repr__(self):
+		return '<flattener at %s>' % hex(id(self))
 
-
-class count(Stream):
-	"""Count the number of elements of a stream"""
-	pass
+flatten = flattener()
 
 
 #_______________________________________________________________________

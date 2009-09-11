@@ -1,12 +1,72 @@
-"""Lazy stream, with pipelining via the '>>' operator.
+"""Lazily-evaluated stream with pipelining via the '>>' operator.
 
-Anything iterable can be piped to a stream.  A stream can be piped to
-any function taking one iterable argument.
+Streams are generalized iterators with a pipelining mechanism defined
+in the method __call__(), enabling data-flow programming in Python.
 
->>> seq() >> map(lambda x: x**2) >> filter(lambda x: x%2 == 1) >> take(10) >> sum
-1330
+A pipeline usually starts with a generator, then passes through a number
+of filters.  Multiple streams can be branched and combined.  Finally,
+the output is fed to an accumulator, which can be any function of one
+iterable argument.
 
-Don't forget to combine with itertools and other functional programming tools.
+Generators: seq, gseq, repeatcall, chaincall, anything iterable
+
+Filters: drop, dropwhile, takewhile, map, mapmethod, cut, filter, reduce, apply, generate
+
+Combinators: append, prepend, takei, dropi, tee, flatten
+
+Accumulators: item
+	(already in Python: list, sum, max, min, dict, ...)
+
+take() and item[] work similarly, except for notation and the fact that
+item[] return a list whereas take() return a stream which can be further
+piped to another accumulator.
+
+Values are computed only when an accumulator forces some or all evaluation
+(not when the stream are set up).
+
+
+Example: Grep some lines from file, strip them, then accumulate
+----
+>>> import re
+--> open('log').xreadlines() >> filter(re.compile('[Pp]attern').search) >> mapmethod('strip') >> list
+
+
+Example: list the first 5 partial sums of the geometric series 1 + 1/2 + 1/4 + ...
+----
+>>> from operator import add
+>>> gseq(0.5) >> reduce(add) >> item[:5]
+[1, 1.5, 1.75, 1.875, 1.9375]
+
+Here gseq() generates the geometric series.
+
+
+Example: random walk in 2D
+----
+>>> from random import choice
+>>> vectoradd = lambda u,v: zip(u, v) >> map(sum) >> list
+>>> rw = lambda: repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> reduce(vectoradd, [0, 0])
+
+Here calling choice repeatedly yields the series of unit vectors
+representing the directions that the walker takes, then those vectors
+are added to get a series of coordinates.
+
+Q: How many step does it take the walker to return to the origin?  Or does
+he drift away forever?  Try this a few times!
+
+--> (rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> len) + 1
+
+The first element which is [0, 0] needs to be dropped so that takewhile
+does not truncate immediately.
+
+Q: What is the farthest point that he wanders upto the first return?
+
+>>> from functools import partial
+>>> vectorlen = lambda v: sum(x**2 for x in v)
+
+--> rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> partial(max, key=vectorlen)
+
+Vectors can be compared lengthwise by the sum of squares of the
+components.  The pipe is the same as above otherwise.
 """
 
 #_______________________________________________________________________
@@ -20,47 +80,38 @@ Don't forget to combine with itertools and other functional programming tools.
 #_______________________________________________________________________
 
 
-#_______________________________________________________________________
-#
-# PERFORMANCE
-#_______________________________________________________________________
-#
-#	* itertools.count() is 150% faster than seq(), no doubt due to
-# the former implementation in C.
-#_______________________________________________________________________
-
 __version__ = '0.2'
 __author__ = 'Hai-Anh Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
-__credits__ = 'Jakub Wilk, for the design from python-pipeline'
 __all__ = [
 	'Stream',
-	'takei',
 	'take',
+	'takeall',
 	'item',
+	'takei',
+	'drop',
 	'dropi',
-	'dropv',
-	'map',
-	'filter',
-	'grep',
-	'reduce',
 	'apply',
-	'flatten',
-	'alternate',
-	'zip',
+	'map',
+	'mapmethod',
+	'cut',
+	'filter',
+	'reduce',
+	'takewhile',
+	'dropwhile',
+	'generate',
 	'tee',
 	'prepend',
 	'append',
-	'count',
+	'flatten',
 	'seq',
 	'gseq',
+	'repeatcall',
+	'chaincall'
 ]
 
-
-import collections, itertools
-import re
-
-from functools import reduce as reduce_func
+import itertools
+import collections
 
 #_______________________________________________________________________
 #
@@ -73,17 +124,16 @@ class Stream(object):
 	The outgoing stream is represented by the attribute 'iterator'.
 
 	The processor is represented by  the method __call__(inpipe), which
-	combine iterator attribute,
-
+	combine iterator self's iterator with inpipe's, producing a new iterator
 	representing a new outgoing stream.
 
-	>>> s = Stream(seq(1))
+	>>> s = Stream(seq(1, 2))
 	>>> s >> next
 	1
 	>>> s >> next
-	2
-	>>> s >> next
 	3
+	>>> next(s)
+	5
 	"""
 	__slots__ = 'iterator',
 
@@ -104,38 +154,25 @@ class Stream(object):
 		self.iterator = self.__call__(inpipe)
 		return self
 
-	def __extend__(self, inpipe):
-		inpipe.iterator = self.__call__(inpipe)
-		return inpipe
+	def __rshift__(self, outpipe):
+		return Stream.pipe(self, outpipe)
 
-	def __rshift__(self, other):
-		return Stream.__pipe(self, other)
-
-	def __rrshift__(self, other):
-		return Stream.__pipe(other, self)
+	def __rrshift__(self, inpipe):
+		return Stream.pipe(inpipe, self)
 
 	@staticmethod
-	def __pipe(left, right):
-		# Implement the overloading of  the operator '>>'
-		if hasattr(right, '__pipe__'):
-			func = right.__pipe__
-		elif hasattr(right, '__call__'):
-			func = right.__call__
+	def pipe(inpipe, outpipe):
+		"""Connect inpipe to outpipe by calling outpipe.__pipe__(inpipe)"""
+		if hasattr(outpipe, '__pipe__'):
+			connect = outpipe.__pipe__
+		elif hasattr(outpipe, '__call__'):
+			connect = outpipe.__call__
 		else:						### no connection mechanism exists
-			return right if isinstance(right, Stream) else Stream(right)
-		return func(left)
+			return outpipe if isinstance(outpipe, Stream) else Stream(outpipe)
+		return connect(inpipe)
 
-	def __lshift__(self, other):
-		return Stream.__extend(self, other)
-
-	@staticmethod
-	def __extend(left, right):
-		# Implement the overloading of  the operator '<<'
-		if hasattr(right, '__extend__'):
-			func = right.__extend__
-		else:						### no connection mechanism exists
-			return right if isinstance(right, Stream) else Stream(right)
-		return func(left)
+	def __len__(self):				### this will force all evaluation
+		return len(list(self.iterator))
 
 	def __repr__(self):
 		return 'Stream(%s)' % repr(self.iterator)
@@ -165,18 +202,19 @@ class take(Stream):
 	def __init__(self, *args):
 		self.iterator = iter([])
 		self.slice = slice(*args)
+		self.cache = []
 
 	def __call__(self, inpipe):
 		if negative(self.slice.stop) or negative(self.slice.start) \
 		or not (self.slice.start or self.slice.stop) \
 		or (not self.slice.start and negative(self.slice.step)) \
-		or not (self.slice.stop or negative(self.slice.step)):
+		or (not self.slice.stop and not negative(self.slice.step)):
 			self.cache = list(inpipe)		## force all evaluation 	##
 		else:							## force some evaluation ##
-			if not self.slice.step or self.slice.step > 0:
-				stop = self.slice.stop
-			else:
+			if negative(self.slice.step):
 				stop = self.slice.start
+			else:
+				stop = self.slice.stop
 			i = iter(inpipe)
 			try:
 				self.cache =  [next(i) for _ in xrange(stop)]
@@ -185,24 +223,27 @@ class take(Stream):
 		self.cache = self.cache[self.slice]
 		return iter(self.cache)
 
-	def __pipe__(self, inpipe):
-		self.iterator = self.__call__(inpipe)
-		return self
-
-	def __extend__(self, inpipe):
-		inpipe.iterator = self.__call__(inpipe)
-		return inpipe
+	def __len__(self):
+		return len(self.cache)
 
 	def __repr__(self):
 		return 'Stream(%s)' % repr(self.cache)
+
+takeall = take(None)
 
 
 class itemgetter(take):
 	"""
 	Implement Python slice notation for take. Return a list.
-	
+
+	>>> xrange(20) >> item[10]
+	10
+
 	>>> xrange(20) >> item[::-2]
 	[19, 17, 15, 13, 11, 9, 7, 5, 3, 1]
+
+	>>> xrange(20) >> item[5::2]
+	[5, 7, 9, 11, 13, 15, 17, 19]
 	"""
 	__slots__ = 'get1'
 
@@ -212,13 +253,17 @@ class itemgetter(take):
 
 	@classmethod
 	def __getitem__(cls, sliceobj):
-		s = cls()
+		getter = cls()
 		if type(sliceobj) is type(1):
-			s.get1 = True
-			s.slice = slice(sliceobj)
+			getter.get1 = True
+			if sliceobj == -1:
+				sliceobj = None
+			else:
+				sliceobj += 1
+			getter.slice = slice(sliceobj)
 		else:
-			s.slice = sliceobj
-		return s
+			getter.slice = sliceobj
+		return getter
 
 	def __pipe__(self, inpipe):
 		super(itemgetter, self).__call__(inpipe)
@@ -242,7 +287,7 @@ class takei(Stream):
 	>>> xrange(15) >> takei([3, -2, 7, 7]) >> list
 	[3, 7]
 	"""
-	__slots__ = 'indexiter',
+	__slots__ = 'indexiter'
 
 	def __init__(self, indices):
 		"""indexes should be non-negative integers in monotonically
@@ -251,9 +296,9 @@ class takei(Stream):
 		self.iterator = iter([])
 		self.indexiter = iter(indices)
 
-	def __call__(self, other):
+	def __call__(self, inpipe):
 		def genfunc():
-			i = iter(other)
+			i = iter(inpipe)
 			old_idx = -1
 			idx = next(self.indexiter)			# next value to yield
 			counter = seq()
@@ -267,6 +312,25 @@ class takei(Stream):
 					old_idx = idx
 					idx = next(self.indexiter)
 		return genfunc()
+
+
+class drop(Stream):
+	"""Drop the first n elements of the incoming stream
+
+	>>> seq(0, 2) >> drop(1) >> take(5)
+	Stream([2, 4, 6, 8, 10])
+	"""
+	__slots__ = 'n'
+	
+	def __init__(self, n):
+		"""n: the number of elements to be dropped"""
+		self.iterator = iter([])
+		self.n = n
+
+	def __call__(self, inpipe):
+		i = iter(inpipe)
+		collections.deque(itertools.islice(i, self.n), maxlen=0)
+		return i
 
 
 class dropi(Stream):
@@ -292,9 +356,9 @@ class dropi(Stream):
 		self.iterator = iter([])
 		self.indexiter = iter(indices)
 
-	def __call__(self, other):
+	def __call__(self, inpipe):
 		def genfunc():
-			i = iter(other)
+			i = iter(inpipe)
 			counter = seq()
 			def try_next_idx():
 				## so that the stream keeps going 
@@ -318,41 +382,6 @@ class dropi(Stream):
 		return genfunc()
 
 
-class dropv(Stream):
-	"""Drop elements of the incoming stream by values.
-
-	>>> seq(1) >> dropv(seq(2, 2)) >> item[:10]
-	[1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
-
-	>>> seq(10) >> dropv(seq(2, 2)) >> item[:10]
-	[11, 13, 15, 17, 19, 21, 23, 25, 27, 29]
-	"""
-	__slot__ = 'valueiter',
-
-	def __init__(self, values):
-		"""indexes: a stream of the values of element to be dropped.
-
-		Require both the incoming and the values streams to be in
-		monotonically increasing order.
-		"""
-		self.iterator = iter([])
-		self.valueiter = iter(values)
-
-	def __call__(self, other):
-		def genfunc():
-			i = iter(other)
-			y = next(self.valueiter)
-			while 1:
-				x = next(i)
-				while x>y:
-					y = next(self.valueiter)
-				if x==y:
-					y = next(self.valueiter)
-				elif x<y:
-					yield x
-		return genfunc()
-
-
 #_______________________________________________________________________
 #
 # Functional processing
@@ -362,75 +391,114 @@ class dropv(Stream):
 class FunctionFilter(Stream):
 	"""Base class for stream filter based on a function"""
 
-	__slots__ = 'function',
+	__slots__ = 'function'
 
 	def __init__(self, function):
-		if not hasattr(function, '__call__'):
-			raise TypeError("'%s' object is not callable" % function)
 		self.iterator = iter([])
 		self.function = function
 
 
 class apply(FunctionFilter):
-	"""itertools.starmap"""
-	pass
-
-
-class count(apply):
-	"""Count the number of elements of a stream"""
-	pass
+	"""Invoke a function using each stream element as a list of arguments, 
+	a la itertools.starmap.
+	"""
+	def __call__(self, inpipe):
+		return itertools.starmap(self.function, inpipe)
 
 
 class map(FunctionFilter):
-	"""Map a function onto a stream. 
+	def __call__(self, inpipe):
+		return itertools.imap(self.function, inpipe)
 
-	>>> xrange(1,50,7) >> map(lambda x: x**2) >> list
-	[1, 64, 225, 484, 841, 1296, 1849]
+
+class mapmethod(map):
+	"""Call method m(*args, **kwargs) on the each object that comes out of the input pipe.
+
+	>>> ['foo bar 1', 'foo bar 2'] >> mapmethod('split') >> list
+	[['foo', 'bar', '1'], ['foo', 'bar', '2']]
 	"""
-	def __call__(self, other):
-		return itertools.imap(self.function, other)
+	def __init__(self, m, *args, **kwargs):
+		f = lambda obj: getattr(obj, m)(*args, **kwargs)
+		super(map, self).__init__(f)
+
+
+class itemcutter(mapmethod):
+	"""A mapmethod on '__itemgetter__' with slice notation.
+
+	>>> [[1, 2, 3], [4, 5, 6]] >> cut[::2] >> list
+	[[1, 3], [4, 6]]
+	"""
+
+	def __init__(self, *args):
+		super(itemcutter, self).__init__('__getitem__', *args)
+
+	@classmethod
+	def __getitem__(cls, args):
+		return cls(args)
+
+	def __repr__(self):
+		return '<cutter at %s>' % hex(id(self))
+
+cut = itemcutter()
 
 
 class filter(FunctionFilter):
-	"""Filter a stream by a function, taking only elements for which
-	the function evaluate to True.
-
+	"""
 	>>> even = lambda x: x%2 == 0
 	>>> xrange(1, 40, 3) >> filter(even) >> list
 	[4, 10, 16, 22, 28, 34]
 	"""
-	def __init__(self, function=None):
-		try:
-			super(filter, self).__init__(function)
-		except TypeError:
-			pass
-
-	def __call__(self, other):
-		return itertools.ifilter(self.function, other)
+	def __call__(self, inpipe):
+		return itertools.ifilter(self.function, inpipe)
 
 
 class takewhile(FunctionFilter):
-	pass
+	def __call__(self, inpipe):
+		return itertools.takewhile(self.function, inpipe)
 
 
 class dropwhile(FunctionFilter):
-	pass
-
-
-class grep(filter):
-	pass
+	def __call__(self, inpipe):
+		return itertools.dropwhile(self.function, inpipe)
 
 
 class reduce(FunctionFilter):
-	"""Haskell's scanl"""
-	def __call__(self, other):
+	"""Haskell's scanl.
+
+	>>> from operator import add
+	>>> gseq(0.5) >> reduce(add) >> item[:5]
+	[1, 1.5, 1.75, 1.875, 1.9375]
+	"""
+	def __init__(self, function, initval=None):
+		self.iterator = iter([])
+		self.function = function
+		self.initval = initval
+
+	def __call__(self, inpipe):
 		def genfunc():
-			i = other.iterator
-			while 1:	
-				x = next(i)
-				y = next(i)
-				yield self.function(x, y)
+			i = iter(inpipe)
+			if self.initval:
+				accumulated = self.initval
+			else:
+				accumulated = next(i)
+			while 1:
+				yield accumulated
+				val = next(i)
+				accumulated = self.function(accumulated, val)
 		return genfunc()
+
+
+class generate(Stream):
+	"""Eval an generator expression where {0} indicates the input stream"""
+	__slots__ = 'expr'
+
+	def __init__(self, expr):
+		self.expr = expr
+		self.iterator = iter([])
+
+	def __call__(self, inpipe):
+		return eval( '(' + self.expr.format('inpipe') + ')' )
+
 
 #_______________________________________________________________________
 #
@@ -445,11 +513,8 @@ class prepend(Stream):
 	[0, 2, 4, 6, 8, 7, 14, 21, 28, 35]
 	"""
 	def __call__(self, inpipe):
-		"""Prepend at the beginning of other"""
-		if self.iterator:
-			return itertools.chain(self.iterator, iter(inpipe))
-		else:
-			return iter(inpipe)
+		"""Prepend at the beginning of inpipe"""
+		return itertools.chain(self.iterator, inpipe)
 
 
 class append(Stream):
@@ -459,15 +524,20 @@ class append(Stream):
 	[1, 8, 15, 1, 4, 7, 'f', 'o', 'o']
 	"""
 	def __call__(self, inpipe):
-		if self.iterator:
-			return itertools.chain(iter(inpipe), self.iterator)
-		else:
-			return iter(inpipe)
+		"""Append to the end of inpipe"""
+		return itertools.chain(inpipe, self.iterator)
 
 
 class tee(Stream):
-	"""Make a branch of a stream"""
+	"""Make a branch from a stream.
 
+	>>> foo = filter(lambda x: x%3==0)
+	>>> bar = seq(0, 2) >> tee(foo)
+	>>> bar >> item[:5]
+	[0, 2, 4, 6, 8]
+	>>> foo >> item[:5]
+	[0, 6, 12, 18, 24]
+	"""
 	__slots__ = 'streamobj',
 
 	def __init__(self, streamobj):
@@ -475,23 +545,14 @@ class tee(Stream):
 		self.iterator = iter([])
 
 	def __pipe__(self, inpipe):
-		"""Modify streamobj to refer to a copy of iterable.
-		Does not always work, see PEP-232.
-		"""
-		inpipe.iterator, self.streamobj.iterator = itertools.tee(inpipe)
+		"""Make a branch of inpipe to pipe to self.streamobj"""
+		branch1, branch2 = itertools.tee(inpipe)
+		Stream.pipe(branch1, self.streamobj)
 		if isinstance(inpipe, Stream):
+			inpipe.iterator = branch2
 			return inpipe
 		else:
-			return Stream(inpipe)
-
-
-class alternate(Stream):
-	pass
-
-
-class zip(Stream):
-	pass
-
+			return Stream(branch2)
 
 #_______________________________________________________________________
 #
@@ -500,13 +561,18 @@ class zip(Stream):
 
 
 class flattener(Stream):
-	"""Flatten a nested stream of arbitrary depth"""
+	"""Flatten a nested stream of arbitrary depth
+
+	>>> (xrange(i) for i in seq(step=3)) >> flatten >> item[:18]
+	[0, 1, 2, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6, 7, 8]
+	"""
 	@staticmethod
 	def __call__(inpipe):
-		def genfunc():
+		def flatten():
+			## Maintain a LIFO stack of iterators
 			stack = []
 			i = iter(inpipe)
-			while 1:
+			while True:
 				try:
 					e = next(i)
 					if hasattr(e, "__iter__") and not isinstance(e, basestring):
@@ -518,8 +584,8 @@ class flattener(Stream):
 					try:
 						i = stack.pop()
 					except IndexError:
-						return
-		return genfunc()
+						break
+		return flatten()
 
 	def __repr__(self):
 		return '<flattener at %s>' % hex(id(self))
@@ -529,7 +595,7 @@ flatten = flattener()
 
 #_______________________________________________________________________
 #
-# Useful generators
+# Useful ultilities
 #_____________________________________________________________________
 
 
@@ -539,11 +605,11 @@ def seq(start=0, step=1):
 	>>> seq(1, 0.25) >> item[:10]
 	[1, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25]
 	"""
-	def genfunc(a, d):
+	def seq(a, d):
 		while 1:
 			yield a
 			a += d
-	return genfunc(start, step)
+	return seq(start, step)
 
 def gseq(*args):
 	"""A geometric sequence generator.  Works with any type with * defined.
@@ -552,18 +618,26 @@ def gseq(*args):
 	>>> gseq(Decimal('.2')) >> item[:4]
 	[1, Decimal('0.2'), Decimal('0.04'), Decimal('0.008')]
 	"""
-	def genfunc(a, r):
+	def gseq(a, r):
 		while 1:
 			yield a
 			a *= r
 	if len(args) == 1:
-		return genfunc(1, args[0])
+		return gseq(1, args[0])
 	elif len(args) == 2:
-		return genfunc(args[0], args[1])
+		return gseq(args[0], args[1])
 	else:
 		raise TypeError('gseq expects 1 or 2 arguments, got %s' % len(args))
 
-def fixpoint(func, initval):
+def repeatcall(func, *args):
+	"""Repeatedly call func(*args) and yield the result.
+
+	Useful when func(*args) returns different results, esp. randomly.
+	"""
+	return itertools.starmap(func, itertools.repeat(args))
+
+def chaincall(func, initval):
+	"""Yield func(initval), func(func(initval)), etc."""
 	x = initval
 	while 1:
 		yield x

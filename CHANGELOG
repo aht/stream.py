@@ -1,6 +1,0 @@
-Changes from python-pipeline-0.1.1
-* Removed the hackish STDIN
-* Much better repr
-* After right(left) succeeds, __pipe() does not create an unnecessary
-Stream() instance (the old _or() creates 2 Pipe() instances everytime)
-* docstrings

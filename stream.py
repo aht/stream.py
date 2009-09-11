@@ -1,16 +1,16 @@
 """Lazily-evaluated stream with pipelining via the '>>' operator.
 
-Streams are generalized iterators with a pipelining mechanism defined
-in the method __call__(), enabling data-flow programming in Python.
+Streams are generalized iterators with a pipelining mechanism to enable
+data-flow programming in Python.
 
 A pipeline usually starts with a generator, then passes through a number
-of filters.  Multiple streams can be branched and combined.  Finally,
+of processors.  Multiple streams can be branched and combined.  Finally,
 the output is fed to an accumulator, which can be any function of one
 iterable argument.
 
 Generators: seq, gseq, repeatcall, chaincall, anything iterable
 
-Filters: drop, dropwhile, takewhile, map, mapmethod, cut, filter, reduce, apply, generate
+Processors: drop, dropwhile, takewhile, map, mapmethod, cut, filter, reduce, apply, generate
 
 Combinators: append, prepend, takei, dropi, tee, flatten
 
@@ -23,50 +23,6 @@ piped to another accumulator.
 
 Values are computed only when an accumulator forces some or all evaluation
 (not when the stream are set up).
-
-
-Example: Grep some lines from file, strip them, then accumulate
-----
->>> import re
---> open('log').xreadlines() >> filter(re.compile('[Pp]attern').search) >> mapmethod('strip') >> list
-
-
-Example: list the first 5 partial sums of the geometric series 1 + 1/2 + 1/4 + ...
-----
->>> from operator import add
->>> gseq(0.5) >> reduce(add) >> item[:5]
-[1, 1.5, 1.75, 1.875, 1.9375]
-
-Here gseq() generates the geometric series.
-
-
-Example: random walk in 2D
-----
->>> from random import choice
->>> vectoradd = lambda u,v: zip(u, v) >> map(sum) >> list
->>> rw = lambda: repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> reduce(vectoradd, [0, 0])
-
-Here calling choice repeatedly yields the series of unit vectors
-representing the directions that the walker takes, then those vectors
-are added to get a series of coordinates.
-
-Q: How many step does it take the walker to return to the origin?  Or does
-he drift away forever?  Try this a few times!
-
---> (rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> len) + 1
-
-The first element which is [0, 0] needs to be dropped so that takewhile
-does not truncate immediately.
-
-Q: What is the farthest point that he wanders upto the first return?
-
->>> from functools import partial
->>> vectorlen = lambda v: sum(x**2 for x in v)
-
---> rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> partial(max, key=vectorlen)
-
-Vectors can be compared lengthwise by the sum of squares of the
-components.  The pipe is the same as above otherwise.
 """
 
 #_______________________________________________________________________
@@ -80,7 +36,7 @@ components.  The pipe is the same as above otherwise.
 #_______________________________________________________________________
 
 
-__version__ = '0.2'
+__version__ = '0.3'
 __author__ = 'Hai-Anh Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
 __all__ = [

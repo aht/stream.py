@@ -1,0 +1,70 @@
+Introduction to stream.py
+======================
+Streams are generalized iterators with a pipelining mechanism, overloading
+the '>>' operator,  to enable data-flow programming in Python.
+
+The idea is to take the output of a function that turn an iterable into
+another iterable and plug that as the input of another such function.
+While you can already do this using function composition, this package
+provides an elegant notation for it by overloading the '>>' operator.
+
+This approach focuses the programming on processing streams of data, step
+by step.  A pipeline usually starts with a generator, then passes through
+a number of processors.  Multiple streams can be branched and combined.
+Finally, the output is fed to an accumulator, which can be any function
+of one iterable argument.
+
+Another advantage is that the values are lazily computed, i.e. only when
+the accumulator needs to have it.
+
+
+### Example: String processing
+Grep some lines from a file, strip them then accumulate into a list.
+The usual way:
+
+	import re
+	result = []
+	pattern = re.compile('[Pp]attern')
+	for line in open('log'):
+		if pattern.search(line):
+			result += [line.strip()]
+
+Using stream:
+
+	import re
+	result = open('log').xreadlines() >> filter(re.compile('[Pp]attern').search) >> mapmethod('strip') >> list
+
+
+### Example: Partial sums
+Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ...
+
+	from operator import add
+	gseq(0.5) >> reduce(add) >> item[:5]
+	[1, 1.5, 1.75, 1.875, 1.9375]
+
+
+### Example: Random Walk
+Generate an infinite stream of coordinates representing the position of
+a random walker in 2D.
+
+	from random import choice
+	vectoradd = lambda u,v: zip(u, v) >> map(sum) >> list
+	rw = lambda: repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> reduce(vectoradd, [0, 0])
+
+Here calling choice repeatedly yields the series of unit vectors
+representing the directions that the walker takes, then these vectors
+are gradually added to get a series of coordinates.
+
+Q: What is the farthest point that he wanders upto the first return to the origin?
+
+	from functools import partial
+	vectorlen = lambda v: sum(x**2 for x in v)
+	rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> partial(max, key=vectorlen)
+
+The first coordinate which is [0, 0] needs to be dropped otherwise
+takewhile will truncate immediately.
+
+Vectors can be compared lengthwise by the sum of squares of the
+components.
+
+Note that the walker may drift away forever and never to return!

@@ -10,7 +10,8 @@ iterable argument.
 
 Generators: seq, gseq, repeatcall, chaincall, anything iterable
 
-Processors: drop, dropwhile, takewhile, map, getname, callmethod, cut, filter, reduce, apply, generate
+Processors: drop, dropwhile, takewhile, map, getname, callmethod, cut,
+filter, reduce, apply, generate
 
 Combinators: append, prepend, takei, dropi, tee, flatten
 
@@ -75,7 +76,7 @@ class Stream(object):
 	The outgoing stream is represented by the attribute 'iterator'.
 
 	The processor is represented by  the method __call__(inpipe), which
-	combine iterator self's iterator with inpipe's, producing a new iterator
+	combine self's iterator with inpipe's, producing a new iterator
 	representing a new outgoing stream.
 
 	>>> s = Stream(seq(1, 2))
@@ -113,7 +114,6 @@ class Stream(object):
 
 	@staticmethod
 	def pipe(inpipe, outpipe):
-		"""Connect inpipe to outpipe by calling outpipe.__pipe__(inpipe)"""
 		if hasattr(outpipe, '__pipe__'):
 			connect = outpipe.__pipe__
 		elif hasattr(outpipe, '__call__'):
@@ -191,7 +191,8 @@ class itemgetter(take):
 	[0, 2, 4, 6, 8]
 	>>> a >> item[:5]
 	[10, 11, 12, 13, 14]
-
+	>>> xrange(20) >> item[-2]
+	18
 	>>> xrange(20) >> item[::-2]
 	[19, 17, 15, 13, 11, 9, 7, 5, 3, 1]
 	"""
@@ -367,32 +368,32 @@ class getname(map):
 	... 	def __init__(self, x, y):
 	... 		self.x, self.y = x, y
 
-	>>> [Foo(2, 7), Foo(1, 4)] >> getname('x', 'y') >> item[:]
-	[[2, 7], [1, 4]]
+	>>> [Foo(2, 7), Foo(1, 4)] >> getname('x', 'x', 'y') >> item[:]
+	[[2, 2, 7], [1, 1, 4]]
 	"""
 	def __init__(self, *args):
 		if not args:
-			raise ValueError('must supply attribute names to get')
+			raise ValueError('must supply names to get')
 		f = lambda obj: [getattr(obj, a) for a in args]
 		super(map, self).__init__(f)
 
 
 class callmethod(map):
-	"""Call method m(*args, **kwargs) on the each object that comes out of the input pipe.
-
-	>>> ['foo bar 1', 'foo bar 2'] >> callmethod('split') >> list
-	[['foo', 'bar', '1'], ['foo', 'bar', '2']]
-	"""
 	def __init__(self, m, *args, **kwargs):
+		"""Call method m(*args, **kwargs) on the each object that comes out of the input pipe.
+	
+		>>> ['foo bar 1', 'foo bar 2'] >> callmethod('split') >> list
+		[['foo', 'bar', '1'], ['foo', 'bar', '2']]
+		"""
 		f = lambda obj: getattr(obj, m)(*args, **kwargs)
 		super(map, self).__init__(f)
 
 
 class itemcutter(callmethod):
-	"""A mapmethod on '__itemgetter__' with slice notation.
+	"""A callmethod on '__itemgetter__' with slice notation.
 
-	>>> [[1, 2, 3], [4, 5, 6]] >> cut[::2] >> list
-	[[1, 3], [4, 6]]
+	>>> [range(10), range(10, 20)] >> cut[::2] >> list
+	[[0, 2, 4, 6, 8], [10, 12, 14, 16, 18]]
 	"""
 
 	def __init__(self, *args):
@@ -454,7 +455,10 @@ class reduce(FunctionFilter):
 
 
 class generate(Stream):
-	"""Eval an generator expression where {0} indicates the input stream"""
+	"""Eval an generator expression where {0} indicates the input stream
+	>>> range(10) >> generate("x if x % 2 else 'x' for x in {0}") >> list
+	['x', 1, 'x', 3, 'x', 5, 'x', 7, 'x', 9]
+	"""
 	__slots__ = 'expr'
 
 	def __init__(self, expr):

@@ -25,7 +25,7 @@ setup(
 	author = 'Hai-Anh Trinh',
 	author_email = 'moc.liamg@hnirt.iah.hna:otliam'[::-1],
 	url = 'http://github.com/aht/stream.py',
-	license='BSD',
+	license='MIT',
 	platforms=['any'],
 	classifiers=filter(None, classifiers.split("\n")),
 	py_modules = ['stream']

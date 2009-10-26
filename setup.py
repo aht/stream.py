@@ -24,7 +24,7 @@ setup(
 	long_description = stream.__doc__.split('\n\n')[1],
 	author = 'Hai-Anh Trinh',
 	author_email = 'moc.liamg@hnirt.iah.hna:otliam'[::-1],
-	url = 'http://trinhhaianh.com/stream.py/',
+	url = 'http://github.com/aht/stream.py',
 	license='BSD',
 	platforms=['any'],
 	classifiers=filter(None, classifiers.split("\n")),

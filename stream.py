@@ -10,7 +10,7 @@ iterable argument.
 
 Generators: seq, gseq, repeatcall, chaincall, anything iterable
 
-Processors: drop, dropwhile, takewhile, map, mapmethod, cut, filter, reduce, apply, generate
+Processors: drop, dropwhile, takewhile, map, getname, callmethod, cut, filter, reduce, apply, generate
 
 Combinators: append, prepend, takei, dropi, tee, flatten
 
@@ -23,20 +23,14 @@ piped to another accumulator.
 
 Values are computed only when an accumulator forces some or all evaluation
 (not when the stream are set up).
+
+A Stream subclass will usually implement __call__, unless it is an
+accumulator and will not return a Stream, in which case it needs to
+implement __pipe__.
 """
 
-#_______________________________________________________________________
-#
-# NOTE
-#_______________________________________________________________________
-#
-#	* I choose the '>>' operator over the '|' of the UNIX pipe because
-# it stands out better in Python code, is less used (e.g. '|' is used
-# for set union), and binds more tightly.
-#_______________________________________________________________________
 
-
-__version__ = '0.3'
+__version__ = '0.4'
 __author__ = 'Hai-Anh Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
 __all__ = [
@@ -49,7 +43,8 @@ __all__ = [
 	'dropi',
 	'apply',
 	'map',
-	'mapmethod',
+	'getname',
+	'callmethod',
 	'cut',
 	'filter',
 	'reduce',
@@ -95,7 +90,7 @@ class Stream(object):
 
 	def __init__(self, iterable=None):
 		"""Make a stream object from an iterable"""
-		self.iterator = iter(iterable if iterable else [])
+		self.iterator = iter(iterable) if iterable else []
 
 	def __iter__(self):
 		return self.iterator
@@ -125,7 +120,7 @@ class Stream(object):
 			connect = outpipe.__call__
 		else:						### no connection mechanism exists
 			return outpipe if isinstance(outpipe, Stream) else Stream(outpipe)
-		return connect(inpipe)
+		return connect(iter(inpipe))
 
 	def __len__(self):				### this will force all evaluation
 		return len(list(self.iterator))
@@ -171,9 +166,8 @@ class take(Stream):
 				stop = self.slice.start
 			else:
 				stop = self.slice.stop
-			i = iter(inpipe)
 			try:
-				self.cache =  [next(i) for _ in xrange(stop)]
+				self.cache =  [next(inpipe) for _ in xrange(stop)]
 			except StopIteration:
 				pass
 		self.cache = self.cache[self.slice]
@@ -192,14 +186,14 @@ class itemgetter(take):
 	"""
 	Implement Python slice notation for take. Return a list.
 
-	>>> xrange(20) >> item[10]
-	10
+	>>> a = Stream(xrange(15))
+	>>> a >> item[:10:2]
+	[0, 2, 4, 6, 8]
+	>>> a >> item[:5]
+	[10, 11, 12, 13, 14]
 
 	>>> xrange(20) >> item[::-2]
 	[19, 17, 15, 13, 11, 9, 7, 5, 3, 1]
-
-	>>> xrange(20) >> item[5::2]
-	[5, 7, 9, 11, 13, 15, 17, 19]
 	"""
 	__slots__ = 'get1'
 
@@ -236,6 +230,8 @@ item = itemgetter()
 
 class takei(Stream):
 	"""Select elements of the incoming stream by a stream of indexes.
+	>>> seq() >> takei([0, 4, 7]) >> list
+	[0, 4, 7]
 
 	>>> seq() >> takei(xrange(2,43,4)) >> list
 	[2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42]
@@ -254,14 +250,13 @@ class takei(Stream):
 
 	def __call__(self, inpipe):
 		def genfunc():
-			i = iter(inpipe)
 			old_idx = -1
 			idx = next(self.indexiter)			# next value to yield
 			counter = seq()
 			while 1:
 				c = next(counter)
-				elem = next(i)
-				while idx <= old_idx:		# ignore bad values
+				elem = next(inpipe)
+				while idx <= old_idx:			# ignore bad values
 					idx = next(self.indexiter)
 				if c == idx:
 					yield elem
@@ -284,9 +279,8 @@ class drop(Stream):
 		self.n = n
 
 	def __call__(self, inpipe):
-		i = iter(inpipe)
-		collections.deque(itertools.islice(i, self.n), maxlen=0)
-		return i
+		collections.deque(itertools.islice(inpipe, self.n), maxlen=0)
+		return inpipe
 
 
 class dropi(Stream):
@@ -314,7 +308,6 @@ class dropi(Stream):
 
 	def __call__(self, inpipe):
 		def genfunc():
-			i = iter(inpipe)
 			counter = seq()
 			def try_next_idx():
 				## so that the stream keeps going 
@@ -327,7 +320,7 @@ class dropi(Stream):
 			idx, exhausted = try_next_idx()			# next value to discard
 			while 1:
 				c =next(counter)
-				elem = next(i)
+				elem = next(inpipe)
 				while not exhausted and idx <= old_idx:	# ignore bad values
 					idx, exhausted = try_next_idx()	
 				if c != idx:
@@ -367,10 +360,27 @@ class map(FunctionFilter):
 		return itertools.imap(self.function, inpipe)
 
 
-class mapmethod(map):
+class getname(map):
+	"""Get the named attributes from each object of the input pipe.
+
+	>>> class Foo:
+	... 	def __init__(self, x, y):
+	... 		self.x, self.y = x, y
+
+	>>> [Foo(2, 7), Foo(1, 4)] >> getname('x', 'y') >> item[:]
+	[[2, 7], [1, 4]]
+	"""
+	def __init__(self, *args):
+		if not args:
+			raise ValueError('must supply attribute names to get')
+		f = lambda obj: [getattr(obj, a) for a in args]
+		super(map, self).__init__(f)
+
+
+class callmethod(map):
 	"""Call method m(*args, **kwargs) on the each object that comes out of the input pipe.
 
-	>>> ['foo bar 1', 'foo bar 2'] >> mapmethod('split') >> list
+	>>> ['foo bar 1', 'foo bar 2'] >> callmethod('split') >> list
 	[['foo', 'bar', '1'], ['foo', 'bar', '2']]
 	"""
 	def __init__(self, m, *args, **kwargs):
@@ -378,7 +388,7 @@ class mapmethod(map):
 		super(map, self).__init__(f)
 
 
-class itemcutter(mapmethod):
+class itemcutter(callmethod):
 	"""A mapmethod on '__itemgetter__' with slice notation.
 
 	>>> [[1, 2, 3], [4, 5, 6]] >> cut[::2] >> list
@@ -432,14 +442,13 @@ class reduce(FunctionFilter):
 
 	def __call__(self, inpipe):
 		def genfunc():
-			i = iter(inpipe)
 			if self.initval:
 				accumulated = self.initval
 			else:
-				accumulated = next(i)
+				accumulated = next(inpipe)
 			while 1:
 				yield accumulated
-				val = next(i)
+				val = next(inpipe)
 				accumulated = self.function(accumulated, val)
 		return genfunc()
 
@@ -517,7 +526,8 @@ class tee(Stream):
 
 
 class flattener(Stream):
-	"""Flatten a nested stream of arbitrary depth
+	"""Flatten a nested iterable stream of arbitrary depth, ignoring
+	basetring.
 
 	>>> (xrange(i) for i in seq(step=3)) >> flatten >> item[:18]
 	[0, 1, 2, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6, 7, 8]
@@ -527,7 +537,7 @@ class flattener(Stream):
 		def flatten():
 			## Maintain a LIFO stack of iterators
 			stack = []
-			i = iter(inpipe)
+			i = inpipe
 			while True:
 				try:
 					e = next(i)
@@ -593,7 +603,11 @@ def repeatcall(func, *args):
 	return itertools.starmap(func, itertools.repeat(args))
 
 def chaincall(func, initval):
-	"""Yield func(initval), func(func(initval)), etc."""
+	"""Yield func(initval), func(func(initval)), etc.
+	
+	>>> chaincall(lambda x: 3*x, 2) >> take(10)
+	Stream([2, 6, 18, 54, 162, 486, 1458, 4374, 13122, 39366])
+	"""
 	x = initval
 	while 1:
 		yield x

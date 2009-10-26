@@ -1,5 +1,7 @@
+=========================
 Introduction to stream.py
-======================
+=========================
+
 Streams are generalized iterators with a pipelining mechanism, overloading
 the '>>' operator,  to enable data-flow programming in Python.
 
@@ -17,25 +19,27 @@ of one iterable argument.
 Another advantage is that the values are lazily computed, i.e. only when
 the accumulator needs to have it.
 
+Example: better itertools.slice
+-------------------------------
 
-### Example: String processing
+  import itertools.count
+  c = count()
+  c >> item[:5]
+  [0, 1, 2, 3, 4]
+  c >> item[:4:2]
+  [5, 7]
+
+
+Example: String processing
+--------------------------
 Grep some lines from a file, strip them then accumulate into a list.
-The usual way:
 
 	import re
-	result = []
-	pattern = re.compile('[Pp]attern')
-	for line in open('log'):
-		if pattern.search(line):
-			result += [line.strip()]
-
-Using stream:
-
-	import re
-	result = open('log').xreadlines() >> filter(re.compile('[Pp]attern').search) >> mapmethod('strip') >> list
+	result = open('log').xreadlines() >> filter(re.compile('[Pp]attern').search) >> callmethod('strip') >> list
 
 
-### Example: Partial sums
+Example: Partial sums
+---------------------
 Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ...
 
 	from operator import add
@@ -43,7 +47,8 @@ Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ...
 	[1, 1.5, 1.75, 1.875, 1.9375]
 
 
-### Example: Random Walk
+Example: Random Walk
+--------------------
 Generate an infinite stream of coordinates representing the position of
 a random walker in 2D.
 
@@ -68,3 +73,4 @@ Vectors can be compared lengthwise by the sum of squares of the
 components.
 
 Note that the walker may drift away forever and never to return!
+

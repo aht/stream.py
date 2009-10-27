@@ -22,12 +22,12 @@ the accumulator needs to have it.
 Example: better itertools.slice
 -------------------------------
 
-  import itertools.count
+  from itertools import count
   c = count()
-  c >> item[:5]
-  [0, 1, 2, 3, 4]
-  c >> item[:4:2]
-  [5, 7]
+  c >> item[1:10:2]
+->[1, 3, 5, 7, 9] 
+  c >> item[:5] 
+->[10, 11, 12, 13, 14]
 
 
 Example: String processing
@@ -35,7 +35,7 @@ Example: String processing
 Grep some lines from a file, strip them then accumulate into a list.
 
 	import re
-	result = open('log').xreadlines() >> filter(re.compile('[Pp]attern').search) >> callmethod('strip') >> list
+	open('log').xreadlines() >> filter(re.compile('[Pp]attern').search) >> callmethod('strip') >> list
 
 
 Example: Partial sums
@@ -44,7 +44,7 @@ Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ...
 
 	from operator import add
 	gseq(0.5) >> reduce(add) >> item[:5]
-	[1, 1.5, 1.75, 1.875, 1.9375]
+->[1, 1.5, 1.75, 1.875, 1.9375]
 
 
 Example: Random Walk
@@ -55,15 +55,19 @@ a random walker in 2D.
 	from random import choice
 	vectoradd = lambda u,v: zip(u, v) >> map(sum) >> list
 	rw = lambda: repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> reduce(vectoradd, [0, 0])
+  walk = rw()
+  walk >> take(10)
+->Stream([0, 0], ...])
 
 Here calling choice repeatedly yields the series of unit vectors
 representing the directions that the walker takes, then these vectors
 are gradually added to get a series of coordinates.
 
-Q: What is the farthest point that he wanders upto the first return to the origin?
+Question: What is the farthest point that he wanders upto the first return to
+  the origin?
 
 	from functools import partial
-	vectorlen = lambda v: sum(x**2 for x in v)
+	vectorlen = lambda v: v >> map(lambda x: x**2) >> sum
 	rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> partial(max, key=vectorlen)
 
 The first coordinate which is [0, 0] needs to be dropped otherwise

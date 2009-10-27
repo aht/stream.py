@@ -22,7 +22,7 @@ setup(
 	version = stream.__version__,
 	description = stream.__doc__.split('\n')[0],
 	long_description = stream.__doc__.split('\n\n')[1],
-	author = 'Hai-Anh Trinh',
+	author = 'Anh Hai Trinh',
 	author_email = 'moc.liamg@hnirt.iah.hna:otliam'[::-1],
 	url = 'http://github.com/aht/stream.py',
 	license='MIT',

@@ -11,9 +11,9 @@ iterable argument.
 Generators: seq, gseq, repeatcall, chaincall, anything iterable
 
 Processors: drop, dropwhile, takewhile, map, getname, callmethod, cut,
-filter, reduce, apply, generate
+	filter, reduce, apply, generate
 
-Combinators: append, prepend, takei, dropi, tee, flatten
+Combinators: prepend, takei, dropi, tee, flatten
 
 Accumulators: item
 	(already in Python: list, sum, max, min, dict, ...)
@@ -27,12 +27,13 @@ Values are computed only when an accumulator forces some or all evaluation
 
 A Stream subclass will usually implement __call__, unless it is an
 accumulator and will not return a Stream, in which case it needs to
-implement __pipe__.
+implement __pipe__.  The default piping mechanism of Stream is appending
+to the end of the its input (which had better terminate!).
 """
 
 
 __version__ = '0.4'
-__author__ = 'Hai-Anh Trinh'
+__author__ = 'Anh Hai Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
 __all__ = [
 	'Stream',
@@ -54,7 +55,6 @@ __all__ = [
 	'generate',
 	'tee',
 	'prepend',
-	'append',
 	'flatten',
 	'seq',
 	'gseq',
@@ -86,6 +86,8 @@ class Stream(object):
 	3
 	>>> next(s)
 	5
+	>>> [1, 2, 3] >> Stream('foo') >> Stream('bar') >> list
+	[1, 2, 3, 'f', 'o', 'o', 'b', 'a', 'r']
 	"""
 	__slots__ = 'iterator',
 
@@ -102,9 +104,15 @@ class Stream(object):
 	def next(self):
 		return next(self.iterator)
 
+
 	def __pipe__(self, inpipe):
 		self.iterator = self.__call__(inpipe)
 		return self
+
+	def __call__(self, inpipe):
+		"""Append to the end of inpipe(it had better terminate!).
+		"""
+		return itertools.chain(inpipe, self.iterator)
 
 	def __rshift__(self, outpipe):
 		return Stream.pipe(self, outpipe)
@@ -485,17 +493,6 @@ class prepend(Stream):
 	def __call__(self, inpipe):
 		"""Prepend at the beginning of inpipe"""
 		return itertools.chain(self.iterator, inpipe)
-
-
-class append(Stream):
-	"""Append to the end of a stream (it had better terminate!)
-
-	>>> xrange(1, 20, 7) >> append(xrange(1, 10, 3)) >> append('foo') >> list
-	[1, 8, 15, 1, 4, 7, 'f', 'o', 'o']
-	"""
-	def __call__(self, inpipe):
-		"""Append to the end of inpipe"""
-		return itertools.chain(inpipe, self.iterator)
 
 
 class tee(Stream):

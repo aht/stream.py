@@ -34,16 +34,16 @@ Example: String processing
 --------------------------
 Grep some lines from a file, strip them then accumulate into a list.
 
-	import re
-	open('log').xreadlines() >> filter(re.compile('[Pp]attern').search) >> callmethod('strip') >> list
+  import re
+  open('log').xreadlines() >> filter(re.compile('[Pp]attern').search) >> map(method('strip')) >> list
 
 
 Example: Partial sums
 ---------------------
 Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ...
 
-	from operator import add
-	gseq(0.5) >> reduce(add) >> item[:5]
+  from operator import add
+  gseq(0.5) >> reduce(add) >> item[:5]
 ->[1, 1.5, 1.75, 1.875, 1.9375]
 
 
@@ -52,9 +52,9 @@ Example: Random Walk
 Generate an infinite stream of coordinates representing the position of
 a random walker in 2D.
 
-	from random import choice
-	vectoradd = lambda u,v: zip(u, v) >> map(sum) >> list
-	rw = lambda: repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> reduce(vectoradd, [0, 0])
+  from random import choice
+  vectoradd = lambda u,v: zip(u, v) >> map(sum) >> list
+  rw = lambda: repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> reduce(vectoradd, [0, 0])
   walk = rw()
   walk >> take(10)
 ->Stream([0, 0], ...])
@@ -66,15 +66,17 @@ are gradually added to get a series of coordinates.
 Question: What is the farthest point that he wanders upto the first return to
   the origin?
 
-	from functools import partial
-	vectorlen = lambda v: v >> map(lambda x: x**2) >> sum
-	rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> partial(max, key=vectorlen)
+  from functools import partial
+  square = lambda x: x**2
+  vectorlen = lambda v: v >> map(square) >> sum
+  rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> partial(max, key=vectorlen)
 
-The first coordinate which is [0, 0] needs to be dropped otherwise
-takewhile will truncate immediately.
+Note that this might not terminate! The first coordinate which is [0,
+0] needs to be dropped otherwise takewhile will truncate immediately.
 
-Vectors can be compared lengthwise by the sum of squares of the
-components.
+We can actually probe into the stream, like this,
 
-Note that the walker may drift away forever and never to return!
-
+  probe = takeall
+  rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> tee(probe) >> partial(max, key=vectorlen)
+  probe
+->Stream([[0, 0], ...])

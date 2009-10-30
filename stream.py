@@ -33,6 +33,13 @@ __version__ = '0.5'
 __author__ = 'Anh Hai Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
 __all__ = [
+	'seq',
+	'gseq',
+	'repeatcall',
+	'chaincall',
+	'attr',
+	'method',
+	'cond',
 	'Stream',
 	'take',
 	'takeall',
@@ -51,12 +58,6 @@ __all__ = [
 	'tee',
 	'prepend',
 	'flatten',
-	'seq',
-	'gseq',
-	'repeatcall',
-	'chaincall',
-	'attr',
-	'method',
 ]
 
 import itertools
@@ -139,7 +140,7 @@ def method(m, *args, **kwargs):
 
 def cond(predicate, consequence, alternative=None):
 	"""
-	Function replacement for if-else to use in expressions.
+	Functional replacement for if-else to use in expressions.
 
 		>>> x = 2
 		>>> cond(x % 2 == 0, "even", "odd")

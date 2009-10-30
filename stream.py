@@ -136,6 +136,22 @@ def method(m, *args, **kwargs):
 	"""
 	return lambda obj: getattr(obj, m)(*args, **kwargs)
 
+
+def cond(predicate, consequence, alternative=None):
+	"""
+	Function replacement for if-else to use in expressions.
+
+		>>> x = 2
+		>>> cond(x % 2 == 0, "even", "odd")
+		'even'
+		>>> cond(x % 2 == 0, "even", "odd") + '_row'
+		'even_row'
+	"""
+	if predicate:
+		return consequence
+	else:
+		return alternative
+
 #_____________________________________________________________________
 #
 # Base class for stream processor

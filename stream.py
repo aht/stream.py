@@ -10,15 +10,14 @@ iterable argument.
 
 Generators: anything iterable
 
-Processors: drop, dropwhile, takewhile, map, getname, callmethod, cut,
-	filter, reduce, apply, generate
+Processors: drop, dropwhile, takewhile, cut, map,  reduce, filter, apply
 
 Combinators: prepend, takei, dropi, tee, flatten
 
 Accumulators: take, item
 	(already in Python: list, sum, max, min, dict, ...)
 
-Utility functions: seq, gseq, repeatcall, chaincall, attr, method
+Utility functions: seq, gseq, repeatcall, chaincall, attr, method, cond
 
 take() and item[] work similarly, except for notation and the fact that
 item[] returns a list whereas take() returns a stream which can be further
@@ -54,7 +53,6 @@ __all__ = [
 	'reduce',
 	'takewhile',
 	'dropwhile',
-	'generate',
 	'tee',
 	'prepend',
 	'flatten',
@@ -529,22 +527,6 @@ class reduce(FunctionFilter):
 				val = next(inpipe)
 				accumulated = self.function(accumulated, val)
 		return genfunc()
-
-
-class generate(Stream):
-	"""Eval an generator expression where {0} indicates the input stream.
-
-	>>> range(10) >> generate("x if x % 2 else 'x' for x in {0}") >> list
-	['x', 1, 'x', 3, 'x', 5, 'x', 7, 'x', 9]
-	"""
-	__slots__ = 'expr'
-
-	def __init__(self, expr):
-		super(generate, self).__init__()
-		self.expr = expr
-
-	def __call__(self, inpipe):
-		return eval( '(' + self.expr.format('inpipe') + ')' )
 
 
 #_____________________________________________________________________

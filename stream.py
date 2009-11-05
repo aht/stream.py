@@ -17,7 +17,7 @@ Combinators: prepend, takei, dropi, tee, flatten
 Accumulators: take, item
 	(already in Python: list, sum, max, min, dict, ...)
 
-Utility functions: seq, gseq, repeatcall, chaincall, attr, method, cond
+Utility functions: seq, gseq, repeatcall, chaincall, attr, method
 
 take() and item[] work similarly, except for notation and the fact that
 item[] returns a list whereas take() returns a stream which can be further
@@ -38,7 +38,6 @@ __all__ = [
 	'chaincall',
 	'attr',
 	'method',
-	'cond',
 	'Stream',
 	'take',
 	'takeall',
@@ -135,21 +134,6 @@ def method(m, *args, **kwargs):
 	"""
 	return lambda obj: getattr(obj, m)(*args, **kwargs)
 
-
-def cond(predicate, consequence, alternative=None):
-	"""
-	Functional replacement for if-else to use in expressions.
-
-		>>> x = 2
-		>>> cond(x % 2 == 0, "even", "odd")
-		'even'
-		>>> cond(x % 2 == 0, "even", "odd") + '_row'
-		'even_row'
-	"""
-	if predicate:
-		return consequence
-	else:
-		return alternative
 
 #_____________________________________________________________________
 #

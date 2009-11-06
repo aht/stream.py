@@ -182,7 +182,7 @@ class Stream(collections.Iterable):
 		if hasattr(outpipe, '__pipe__'):
 			return outpipe.__pipe__(inpipe)
 		elif hasattr(outpipe, '__call__'):
-			if outpipe.__name__ == 'list':
+			if hasattr(outpipe, '__name__') and outpipe.__name__ == 'list':
 				return outpipe(iter(inpipe))	## God knows why this happens ##
 			else:
 				return outpipe(inpipe)

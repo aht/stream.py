@@ -25,7 +25,7 @@ Generators: anything iterable
 Processors
 	* by index:  take, drop, cut
 	* by condition:  filter, takewhile, dropwhile
-	* by transformation:  map, apply, inject, fold
+	* by transformation:  map, apply, fold
 	* special purpose: attrgetter, methodcaller, splitter
 
 Combinators:  prepend, takei, dropi, tee, flatten
@@ -68,7 +68,7 @@ Example: Partial sums
 -----
 Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ...
 
-  gseq(0.5) >> inject(lambda x, y: x+y) >> item[:5]
+  gseq(0.5) >> fold(lambda x, y: x+y) >> item[:5]
 ->[1, 1.5, 1.75, 1.875, 1.9375]
 
 
@@ -79,7 +79,8 @@ a random walker in 2D.
 
   from random import choice
   vectoradd = lambda u,v: zip(u, v) >> map(sum) >> list
-  rw = lambda: repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> inject(vectoradd, [0, 0])
+  def rw():
+	return repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> fold(vectoradd, [0, 0])
   walk = rw()
   walk >> item[:10]
 ->[[0, 0], ...]
@@ -122,7 +123,7 @@ __all__ = [
 	'map',
 	'cut',
 	'filter',
-	'inject',
+	'fold',
 	'takewhile',
 	'dropwhile',
 	'tee',
@@ -502,7 +503,7 @@ class dropwhile(FunctionFilter):
 		return itertools.dropwhile(self.function, inpipe)
 
 
-class inject(FunctionFilter):
+class fold(FunctionFilter):
 	"""
 	Combines the elements of inpipe by applying a function of two
 	argument to a value and each element in turn.  At each step,
@@ -511,11 +512,11 @@ class inject(FunctionFilter):
 	
 	This example calculate partial sums of the series 1+1/2+1/4+...
 
-	>>> gseq(0.5) >> inject(lambda x, y: x+y) >> item[:5]
+	>>> gseq(0.5) >> fold(lambda x, y: x+y) >> item[:5]
 	[1, 1.5, 1.75, 1.875, 1.9375]
 	"""
 	def __init__(self, function, initval=None):
-		super(inject, self).__init__(function)
+		super(fold, self).__init__(function)
 		self.initval = initval
 
 	def __call__(self, inpipe):

@@ -1,82 +1,27 @@
-=========================
-Introduction to stream.py
-=========================
+Lazily-evaluated stream with pipelining via the '>>' operator.
 
-Streams are generalized iterators with a pipelining mechanism, overloading
-the '>>' operator,  to enable data-flow programming in Python.
-
-The idea is to take the output of a function that turn an iterable into
-another iterable and plug that as the input of another such function.
-While you can already do this using function composition, this package
-provides an elegant notation for it by overloading the '>>' operator.
-
-This approach focuses the programming on processing streams of data, step
-by step.  A pipeline usually starts with a generator, then passes through
-a number of processors.  Multiple streams can be branched and combined.
-Finally, the output is fed to an accumulator, which can be any function
-of one iterable argument.
-
-Another advantage is that the values are lazily computed, i.e. only when
-the accumulator needs to have it.
-
-Example: better itertools.slice
--------------------------------
-
-  from itertools import count
-  c = count()
-  c >> item[1:10:2]
-->[1, 3, 5, 7, 9] 
-  c >> item[:5] 
-->[10, 11, 12, 13, 14]
+Requires Python 2.6.
 
 
-Example: String processing
---------------------------
-Grep some lines from a file, strip them then accumulate into a list.
+INSTALL
+=======
 
-  import re
-  open('log').xreadlines() >> filter(re.compile('[Pp]attern').search) >> map(method('strip')) >> list
+To install system-wide:
 
+    $ sudo python ./setup.py install
 
-Example: Partial sums
----------------------
-Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ...
+or if you just need it in a project:
 
-  from operator import add
-  gseq(0.5) >> reduce(add) >> item[:5]
-->[1, 1.5, 1.75, 1.875, 1.9375]
+    $ cp ./stream.py ~/your/project
 
 
-Example: Random Walk
---------------------
-Generate an infinite stream of coordinates representing the position of
-a random walker in 2D.
+To make sure it works with your Python version, run all doctests:
 
-  from random import choice
-  vectoradd = lambda u,v: zip(u, v) >> map(sum) >> list
-  rw = lambda: repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> reduce(vectoradd, [0, 0])
-  walk = rw()
-  walk >> take(10)
-->Stream([0, 0], ...])
+    $ python ./stream.py -v
 
-Here calling choice repeatedly yields the series of unit vectors
-representing the directions that the walker takes, then these vectors
-are gradually added to get a series of coordinates.
 
-Question: What is the farthest point that he wanders upto the first return to
-  the origin?
+DOCUMENTATION
+=============
 
-  from functools import partial
-  square = lambda x: x**2
-  vectorlen = lambda v: v >> map(square) >> sum
-  rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> partial(max, key=vectorlen)
-
-Note that this might not terminate! The first coordinate which is [0,
-0] needs to be dropped otherwise takewhile will truncate immediately.
-
-We can actually probe into the stream, like this,
-
-  probe = takeall
-  rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> tee(probe) >> partial(max, key=vectorlen)
-  probe
-->Stream([[0, 0], ...])
+./stream.py is well-documented with plenty of examples, both short
+and long.

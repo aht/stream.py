@@ -1,43 +1,116 @@
 """Lazily-evaluated stream with pipelining via the '>>' operator.
 
-Streams are generalized iterators with a pipelining mechanism to enable
-data-flow programming in Python.
+Streams are generalized iterables with a pipelining mechanism to enable
+data-flow programming.
+
+The idea is to take the output of a function that turn an iterable into
+another iterable and plug that as the input of another such function.
+While you can already do this using function composition, this package
+provides an elegant notation for it by overloading the '>>' operator.
 
 A pipeline usually starts with a generator, then passes through a number
 of processors.  Multiple streams can be branched and combined.  Finally,
 the output is fed to an accumulator, which can be any function of one
 iterable argument.
 
+This approach focuses the programming on processing streams of data, step
+by step.  A pipeline usually starts with a generator, then passes through
+a number of processors.  Multiple streams can be branched and combined.
+Finally, the output is fed to an accumulator, which can be any function
+of one iterable argument.
+
 Generators: anything iterable
+	* from this module:  seq, gseq, repeatcall, chaincall
 
-Processors: drop, dropwhile, takewhile, cut, map,  reduce, filter, apply
+Processors
+	* by index:  take, drop, cut
+	* by condition:  filter, takewhile, dropwhile
+	* by transformation:  map, apply, inject, fold
+	* special purpose: attrgetter, methodcaller, splitter
 
-Combinators: prepend, takei, dropi, tee, flatten
+Combinators:  prepend, takei, dropi, tee, flatten
 
-Accumulators: take, item
-	(already in Python: list, sum, max, min, dict, ...)
-
-Utility functions: seq, gseq, repeatcall, chaincall, attr, method
+Accumulators: item, maximum, minimum, reduce
+	* from Python: list, sum, dict, ...
 
 take() and item[] work similarly, except for notation and the fact that
 item[] returns a list whereas take() returns a stream which can be further
-piped to another accumulator.
+piped to another processor.
 
 Values are computed only when an accumulator forces some or all evaluation
 (not when the stream are set up).
-"""
 
+Example: better itertools.slice
+-----
+
+  from itertools import count
+  c = count()
+  c >> item[1:10:2]
+->[1, 3, 5, 7, 9] 
+  c >> item[:5] 
+->[10, 11, 12, 13, 14]
+
+
+Example: String processing
+-----
+Grep some lines matching a regex from a file, cut out the 3rd field
+separated by ':' or '.', strip leading zeroes, then save as a list.
+
+  import re
+  s = open('file').xreadlines() \
+  	>> filter(re.compile(regex).search) \
+  	>> map(splitter(':|\.')) \
+  	>> map(methodcaller('strip', '0')) \
+  	>> list
+
+
+Example: Partial sums
+-----
+Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ...
+
+  gseq(0.5) >> inject(lambda x, y: x+y) >> item[:5]
+->[1, 1.5, 1.75, 1.875, 1.9375]
+
+
+Example: Random Walk
+-----
+Generate an infinite stream of coordinates representing the position of
+a random walker in 2D.
+
+  from random import choice
+  vectoradd = lambda u,v: zip(u, v) >> map(sum) >> list
+  rw = lambda: repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> inject(vectoradd, [0, 0])
+  walk = rw()
+  walk >> item[:10]
+->[[0, 0], ...]
+
+Here calling choice repeatedly yields the series of unit vectors
+representing the directions that the walker takes, then these vectors
+are gradually added to get a series of coordinates.
+
+Question: What is the farthest point that he wanders upto the first return to
+  the origin?
+
+  vectorlen = lambda v: v >> map(lambda x: x**2) >> sum
+  rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> maximum(key=vectorlen)
+->[?, ?]
+
+Note that this might not terminate! The first coordinate which is [0,
+0] needs to be dropped otherwise takewhile will truncate immediately.
+
+We can actually probe into the stream, like this,
+
+  probe = takeall
+  rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> tee(probe) >> maximum(key=vectorlen)
+  probe
+->Stream([[0, 0], ...])
+
+"""
 
 __version__ = '0.5'
 __author__ = 'Anh Hai Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
 __all__ = [
-	'seq',
-	'gseq',
-	'repeatcall',
-	'chaincall',
-	'attr',
-	'method',
 	'Stream',
 	'take',
 	'takeall',
@@ -49,90 +122,30 @@ __all__ = [
 	'map',
 	'cut',
 	'filter',
-	'reduce',
+	'inject',
 	'takewhile',
 	'dropwhile',
 	'tee',
 	'prepend',
 	'flatten',
+	'seq',
+	'gseq',
+	'repeatcall',
+	'chaincall',
+	'attrgetter',
+	'methodcaller',
+	'splitter',
+	'maximum',
+	'minimum',
+	'reduce',
 ]
 
-import itertools
+import __builtin__
 import collections
+import itertools
+import re
 
-
-#_____________________________________________________________________
-#
-# Useful ultilities
-#_____________________________________________________________________
-
-
-def seq(start=0, step=1):
-	"""An arithmetic sequence generator.  Works with any type with + defined.
-
-	>>> seq(1, 0.25) >> item[:10]
-	[1, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25]
-	"""
-	def seq(a, d):
-		while 1:
-			yield a
-			a += d
-	return seq(start, step)
-
-def gseq(*args):
-	"""A geometric sequence generator.  Works with any type with * defined.
-
-	>>> from decimal import Decimal
-	>>> gseq(Decimal('.2')) >> item[:4]
-	[1, Decimal('0.2'), Decimal('0.04'), Decimal('0.008')]
-	"""
-	def gseq(a, r):
-		while 1:
-			yield a
-			a *= r
-	if len(args) == 1:
-		return gseq(1, args[0])
-	elif len(args) == 2:
-		return gseq(args[0], args[1])
-	else:
-		raise TypeError('gseq expects 1 or 2 arguments, got %s' % len(args))
-
-def repeatcall(func, *args):
-	"""Repeatedly call func(*args) and yield the result.Useful when
-	func(*args) returns different results, esp. randomly.
-	"""
-	return itertools.starmap(func, itertools.repeat(args))
-
-def chaincall(func, initval):
-	"""Yield func(initval), func(func(initval)), etc.
-	
-	>>> chaincall(lambda x: 3*x, 2) >> take(10)
-	Stream([2, 6, 18, 54, 162, 486, 1458, 4374, 13122, 39366])
-	"""
-	x = initval
-	while 1:
-		yield x
-		x = func(x)
-
-def attr(*names):
-	"""Return a function that gets the named attributes of an object.
-
-	>>> class Foo:
-	...		def __init__(self, x, y):
-	...			self.x, self.y = x, y
-	>>> [Foo(2, 7), Foo(1, 4)] >> map(attr('x', 'x', 'y')) >> item[:]
-	[[2, 2, 7], [1, 1, 4]]
-	"""
-	return lambda obj: [getattr(obj, a) for a in names]
-
-
-def method(m, *args, **kwargs):
-	"""Return a function that calls the method m(*args, **kwargs) of an object.
-
-	>>> ['foo bar 1', 'foo bar 2'] >> map(method('split')) >> list
-	[['foo', 'bar', '1'], ['foo', 'bar', '2']]
-	"""
-	return lambda obj: getattr(obj, m)(*args, **kwargs)
+from operator import attrgetter, methodcaller
 
 
 #_____________________________________________________________________
@@ -272,7 +285,7 @@ class take(Stream):
 takeall = take(None)
 
 
-class itemgetter(take):
+class itemtaker(take):
 	"""
 	Implement Python slice notation for take. Return a list.
 
@@ -306,16 +319,16 @@ class itemgetter(take):
 		return getter
 
 	def __pipe__(self, inpipe):
-		super(itemgetter, self).__call__(iter(inpipe))
+		super(itemtaker, self).__call__(iter(inpipe))
 		if self.get1:
 			return self.iterable[-1]
 		else:
 			return self.iterable
 
 	def __repr__(self):
-		return '<itemgetter at %s>' % hex(id(self))
+		return '<itemtaker at %s>' % hex(id(self))
 
-item = itemgetter()
+item = itemtaker()
 
 class takei(Stream):
 	"""Select elements of the incoming stream by a stream of indexes.
@@ -450,21 +463,21 @@ class map(FunctionFilter):
 
 
 class itemcutter(map):
-	"""Map the method __getitem__ on the input stream using slice notation.
+	"""Call the method __getitem__ on the input stream using slice notation.
 
 	>>> [range(10), range(10, 20)] >> cut[::2] >> list
 	[[0, 2, 4, 6, 8], [10, 12, 14, 16, 18]]
 	"""
 
 	def __init__(self, *args):
-		super(itemcutter, self).__init__( method('__getitem__', *args) )
+		super(itemcutter, self).__init__( methodcaller('__getitem__', *args) )
 
 	@classmethod
 	def __getitem__(cls, args):
 		return cls(args)
 
 	def __repr__(self):
-		return '<cutter at %s>' % hex(id(self))
+		return '<itemcutter at %s>' % hex(id(self))
 
 cut = itemcutter()
 
@@ -489,15 +502,20 @@ class dropwhile(FunctionFilter):
 		return itertools.dropwhile(self.function, inpipe)
 
 
-class reduce(FunctionFilter):
-	"""Haskell's scanl.
+class inject(FunctionFilter):
+	"""
+	Combines the elements of inpipe by applying a function of two
+	argument to a value and each element in turn.  At each step,
+	the value is set to the value returned by the function, thus it
+	is, in effect, an accumulation.
+	
+	This example calculate partial sums of the series 1+1/2+1/4+...
 
-	>>> from operator import add
-	>>> gseq(0.5) >> reduce(add) >> item[:5]
+	>>> gseq(0.5) >> inject(lambda x, y: x+y) >> item[:5]
 	[1, 1.5, 1.75, 1.875, 1.9375]
 	"""
 	def __init__(self, function, initval=None):
-		super(reduce, self).__init__(function)
+		super(inject, self).__init__(function)
 		self.initval = initval
 
 	def __call__(self, inpipe):
@@ -594,6 +612,99 @@ class flattener(Stream):
 		return '<flattener at %s>' % hex(id(self))
 
 flatten = flattener()
+
+
+#_____________________________________________________________________
+#
+# Useful ultilities
+#_____________________________________________________________________
+
+
+def seq(start=0, step=1):
+	"""An arithmetic sequence generator.  Works with any type with + defined.
+
+	>>> seq(1, 0.25) >> item[:10]
+	[1, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25]
+	"""
+	def seq(a, d):
+		while 1:
+			yield a
+			a += d
+	return seq(start, step)
+
+def gseq(*args):
+	"""A geometric sequence generator.  Works with any type with * defined.
+
+	>>> from decimal import Decimal
+	>>> gseq(Decimal('.2')) >> item[:4]
+	[1, Decimal('0.2'), Decimal('0.04'), Decimal('0.008')]
+	"""
+	def gseq(a, r):
+		while 1:
+			yield a
+			a *= r
+	if len(args) == 1:
+		return gseq(1, args[0])
+	elif len(args) == 2:
+		return gseq(args[0], args[1])
+	else:
+		raise TypeError('gseq expects 1 or 2 arguments, got %s' % len(args))
+
+def repeatcall(func, *args):
+	"""Repeatedly call func(*args) and yield the result.Useful when
+	func(*args) returns different results, esp. randomly.
+	"""
+	return itertools.starmap(func, itertools.repeat(args))
+
+def chaincall(func, initval):
+	"""Yield func(initval), func(func(initval)), etc.
+	
+	>>> chaincall(lambda x: 3*x, 2) >> take(10)
+	Stream([2, 6, 18, 54, 162, 486, 1458, 4374, 13122, 39366])
+	"""
+	x = initval
+	while 1:
+		yield x
+		x = func(x)
+
+def splitter(regex, maxsplit=0):
+	"""
+	Curried version of re.split.
+	
+	>>> ['12.3:7', '14.2:5'] >> map(splitter(':|\.')) >> list
+	[['12', '3', '7'], ['14', '2', '5']]
+	"""
+	return lambda s: re.split(regex, s, maxsplit)
+
+def maximum(key):
+	"""
+	Curried version of the built-in max.
+	
+	>>> Stream([3, 5, 28, 42, 7]) >> maximum(lambda x: x%28) 
+	42
+	"""
+	return lambda s: max(s, key=key)
+
+def minimum(key):
+	"""
+	Curried version of the built-in min.
+	
+	>>> Stream([[13, 52], [28, 35], [42, 6]]) >> minimum(lambda v: v[0] + v[1]) 
+	[42, 6]
+	"""
+	return lambda s: min(s, key=key)
+
+def reduce(function, initval=None):
+	"""
+	Curried version of the built-in reduce.
+	
+	>>> reduce(lambda x, y: x+y)( [1, 2, 3, 4, 5] )
+	15
+	"""
+	if initval is None:
+		return lambda s: __builtin__.reduce(function, s)
+	else:
+		return lambda s: __builtin__.reduce(function, s, initval)
 
 
 if __name__ == "__main__":

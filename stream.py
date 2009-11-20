@@ -64,7 +64,7 @@ separated by ':' or '.', strip leading zeroes, then save as a list::
     s = open('file').xreadlines() \
       >> filter(re.compile(regex).search) \
       >> map(splitter(':|\.')) \
-      >> map(methodcaller('strip', '0')) \
+      >> map(methodcaller('lstrip', '0')) \
       >> list
 
 

@@ -1,4 +1,7 @@
-"""Lazily-evaluated stream with pipelining via the '>>' operator.
+"""Lazily-evaluated stream with pipelining via the '>>' operator
+
+Introduction
+============
 
 Streams are generalized iterables with a pipelining mechanism to enable
 data-flow programming.
@@ -19,19 +22,19 @@ a number of processors.  Multiple streams can be branched and combined.
 Finally, the output is fed to an accumulator, which can be any function
 of one iterable argument.
 
-Generators: anything iterable
-	* from this module:  seq, gseq, repeatcall, chaincall
+**Generators**:  anything iterable
+	+ from this module:  seq, gseq, repeatcall, chaincall
 
-Processors
-	* by index:  take, drop, cut
-	* by condition:  filter, takewhile, dropwhile
-	* by transformation:  map, apply, fold
-	* special purpose: attrgetter, methodcaller, splitter
+**Processors**:
+	+ by index:  take, drop, cut
+	+ by condition:  filter, takewhile, dropwhile
+	+ by transformation:  map, apply, fold
+	+ special purpose:  attrgetter, methodcaller, splitter
 
-Combinators:  prepend, takei, dropi, tee, flatten
+**Combinators**:  prepend, takei, dropi, tee, flatten
 
-Accumulators: item, maximum, minimum, reduce
-	* from Python: list, sum, dict, ...
+**Accumulators**:  item, maximum, minimum, reduce
+	+ from Python:  list, sum, dict, ...
 
 take() and item[] work similarly, except for notation and the fact that
 item[] returns a list whereas take() returns a stream which can be further
@@ -40,75 +43,73 @@ piped to another processor.
 Values are computed only when an accumulator forces some or all evaluation
 (not when the stream are set up).
 
-Example: better itertools.slice
------
+Examples
+========
+
+Better itertools.slice
+----------------------
+::
 
   from itertools import count
   c = count()
-  c >> item[1:10:2]
-->[1, 3, 5, 7, 9] 
-  c >> item[:5] 
-->[10, 11, 12, 13, 14]
+  c >> item[1:10:2]  #-> [1, 3, 5, 7, 9]
+  c >> item[:5]      #-> [10, 11, 12, 13, 14]
 
-
-Example: String processing
------
+String processing
+-----------------
 Grep some lines matching a regex from a file, cut out the 3rd field
-separated by ':' or '.', strip leading zeroes, then save as a list.
+separated by ':' or '.', strip leading zeroes, then save as a list::
 
-  import re
-  s = open('file').xreadlines() \
-  	>> filter(re.compile(regex).search) \
-  	>> map(splitter(':|\.')) \
-  	>> map(methodcaller('strip', '0')) \
-  	>> list
-
-
-Example: Partial sums
------
-Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ...
-
-  gseq(0.5) >> fold(lambda x, y: x+y) >> item[:5]
-->[1, 1.5, 1.75, 1.875, 1.9375]
+    import re
+    s = open('file').xreadlines() \
+      >> filter(re.compile(regex).search) \
+      >> map(splitter(':|\.')) \
+      >> map(methodcaller('strip', '0')) \
+      >> list
 
 
-Example: Random Walk
------
+Partial sums
+------------
+Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ..::
+
+    gseq(0.5) >> fold(lambda x, y: x+y) >> item[:5]
+    #->[1, 1.5, 1.75, 1.875, 1.9375]
+
+
+Random Walk in 2D
+-----------------
 Generate an infinite stream of coordinates representing the position of
-a random walker in 2D.
+a random walker in 2D::
 
-  from random import choice
-  vectoradd = lambda u,v: zip(u, v) >> map(sum) >> list
-  def rw():
-	return repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> fold(vectoradd, [0, 0])
-  walk = rw()
-  walk >> item[:10]
-->[[0, 0], ...]
+    from random import choice
+    vectoradd = lambda u,v: zip(u, v) >> map(sum) >> list
+    rw = lambda: repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> fold(vectoradd, [0, 0])
+    walk = rw()
+    walk >> take(10)
+    #->Stream([[0, 0], ...])
 
 Here calling choice repeatedly yields the series of unit vectors
 representing the directions that the walker takes, then these vectors
 are gradually added to get a series of coordinates.
 
-Question: What is the farthest point that he wanders upto the first return to
-  the origin?
+What is the farthest point that he wanders upto the first return to the
+origin?::
 
-  vectorlen = lambda v: v >> map(lambda x: x**2) >> sum
-  rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> maximum(key=vectorlen)
-->[?, ?]
+    vectorlen = lambda v: v >> map(lambda x: x**2) >> sum
+    rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> maximum(key=vectorlen)
 
-Note that this might not terminate! The first coordinate which is [0,
-0] needs to be dropped otherwise takewhile will truncate immediately.
+Note that this might not terminate!  The first coordinate which is [0, 0]
+needs to be dropped otherwise takewhile will truncate immediately.
 
-We can actually probe into the stream, like this,
+We can also probe into the stream, like this::
 
-  probe = takeall
-  rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> tee(probe) >> maximum(key=vectorlen)
-  probe
-->Stream([[0, 0], ...])
-
+    probe = takeall
+    rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> tee(probe) >> maximum(key=vectorlen)
+    probe
+    #->Stream([[0, 0], ...])
 """
 
-__version__ = '0.5'
+__version__ = '0.5.1'
 __author__ = 'Anh Hai Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
 __all__ = [

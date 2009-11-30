@@ -109,7 +109,7 @@ We can also probe into the stream, like this::
     #->Stream([[0, 0], ...])
 """
 
-__version__ = '0.5.1'
+__version__ = '0.5.2'
 __author__ = 'Anh Hai Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
 __all__ = [

@@ -57,16 +57,16 @@ Better itertools.slice
 
 String processing
 -----------------
-Grep some lines matching a regex from a file, cut out the 3rd field
-separated by ':' or '.', strip leading zeroes, then save as a list::
+Grep some lines matching a regex from a file, cut out the 4th field
+separated by ' ', ':' or '.', strip leading zeroes, then save as a list::
 
     import re
     s = open('file').xreadlines() \
       >> filter(re.compile(regex).search) \
-      >> map(splitter(':|\.')) \
+      >> map(splitter(' |:|\.')) \
+      >> cut[3] \
       >> map(methodcaller('lstrip', '0')) \
       >> list
-
 
 Partial sums
 ------------
@@ -74,7 +74,6 @@ Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ..::
 
     gseq(0.5) >> fold(lambda x, y: x+y) >> item[:5]
     #->[1, 1.5, 1.75, 1.875, 1.9375]
-
 
 Random Walk in 2D
 -----------------

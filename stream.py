@@ -41,8 +41,8 @@ Values are computed only when an accumulator forces some or all evaluation
 Examples
 ========
 
-Better itertools.slice
-----------------------
+Better itertools.islice
+-----------------------
 ::
 
   >>> from itertools import count

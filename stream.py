@@ -681,23 +681,16 @@ def seq(start=0, step=1):
 			a += d
 	return seq(start, step)
 
-def gseq(*args):
+def gseq(ratio, initval=1):
 	"""A geometric sequence generator.  Works with any type with * defined.
 
 	>>> from decimal import Decimal
 	>>> gseq(Decimal('.2')) >> item[:4]
 	[1, Decimal('0.2'), Decimal('0.04'), Decimal('0.008')]
 	"""
-	def gseq(a, r):
-		while 1:
-			yield a
-			a *= r
-	if len(args) == 1:
-		return gseq(1, args[0])
-	elif len(args) == 2:
-		return gseq(args[0], args[1])
-	else:
-		raise TypeError('gseq expects 1 or 2 arguments, got %s' % len(args))
+	while 1:
+		yield initval
+		initval *= ratio
 
 def repeatcall(func, *args):
 	"""Repeatedly call func(*args) and yield the result.Useful when

@@ -130,6 +130,7 @@ __all__ = [
 	'tee',
 	'prepend',
 	'flatten',
+	'zipwith',
 	'seq',
 	'gseq',
 	'repeatcall',
@@ -630,6 +631,20 @@ class flattener(Stream):
 		return '<flattener at %s>' % hex(id(self))
 
 flatten = flattener()
+
+
+class zipwith(Stream):
+	"""
+	>>> range(10) >> zipwith(range(10, 20), range(20,30)) >> take(5)
+	Stream([(0, 10, 20), (1, 11, 21), (2, 12, 22), (3, 13, 23), (4, 14, 24)])
+	"""
+	__slots__ = 'iterables'
+	def __init__(self, *iterables):
+		super(zipwith, self).__init__()
+		self.iterables = list(iterables)
+
+	def __call__(self, inpipe):
+		return itertools.izip(*([inpipe] + self.iterables))
 
 
 #_____________________________________________________________________

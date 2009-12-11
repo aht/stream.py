@@ -310,8 +310,12 @@ class itemtaker(take):
 	[0, 2, 4, 6, 8]
 	>>> a >> item[:5]
 	[10, 11, 12, 13, 14]
-	>>> xrange(20) >> item[-2]
-	18
+	>>> xrange(20) >> item[10]
+	10
+	>>> xrange(20) >> item[-5]
+	15
+	>>> xrange(20) >> item[-1]
+	19
 	>>> xrange(20) >> item[::-2]
 	[19, 17, 15, 13, 11, 9, 7, 5, 3, 1]
 	"""
@@ -325,20 +329,30 @@ class itemtaker(take):
 		getter = cls()
 		if type(sliceobj) is type(1):
 			getter.get1 = True
-			if sliceobj == -1:
-				sliceobj = None
-			else:
-				sliceobj += 1
 			getter.slice = slice(sliceobj)
-		else:
+		elif type(sliceobj) is type(slice(1)):
 			getter.slice = sliceobj
+		else:
+			raise TypeError('index must be an integer or a slice')
 		return getter
 
 	def __pipe__(self, inpipe):
-		super(itemtaker, self).__call__(inpipe)
 		if self.get1:
-			return self.items[-1]
+			## just one item is needed
+			i = self.slice.stop
+			if i > 0:
+				# throw away i values
+				collections.deque(itertools.islice(inpipe, i), maxlen=0)
+				return next(inpipe)
+			else:
+				# keep the last -i items
+				# since we don't know beforehand when the stream stops
+				n = -i if i else 1
+				items = collections.deque(itertools.islice(inpipe, None), maxlen=n)
+				return items[-n]
 		else:
+			## a list is needed, we delegate to superclass
+			super(itemtaker, self).__call__(inpipe)
 			return self.items
 
 	def __repr__(self):
@@ -369,7 +383,7 @@ class takei(Stream):
 	def __call__(self, inpipe):
 		def genfunc():
 			old_idx = -1
-			idx = next(self.indexiter)			# next value to yield
+			idx = next(self.indexiter)	# next value to yield
 			counter = seq()
 			while 1:
 				c = next(counter)

@@ -34,7 +34,7 @@ of one iterable argument.
 **Combinators**:  prepend, takei, dropi, tee, flatten
 
 **Accumulators**:  item, maximum, minimum, reduce
-	+ from Python:  list, sum, dict, ...
+	+ from Python:  list, sum, dict, max, min ...
 
 take() and item[] work similarly, except for notation and the fact that
 item[] returns a list whereas take() returns a stream which can be further
@@ -133,20 +133,25 @@ __all__ = [
 	'gseq',
 	'repeatcall',
 	'chaincall',
+	'itemgetter',
 	'attrgetter',
 	'methodcaller',
 	'splitter',
 	'maximum',
 	'minimum',
 	'reduce',
+	'itertools',
+	'operator',
 ]
 
 import __builtin__
 import collections
 import itertools
+import operator
 import re
+import string
 
-from operator import attrgetter, methodcaller
+from operator import itemgetter, attrgetter, methodcaller
 
 
 #_____________________________________________________________________
@@ -154,16 +159,16 @@ from operator import attrgetter, methodcaller
 # Base class for stream processor
 #_____________________________________________________________________
 
-class BrokenPipeError(Exception): pass
+class BrokenPipe(Exception): pass
 
 
-class Stream(collections.Iterable):
-	"""A class representing both a stream and a processor.
+class Stream(collections.Iterator):
+	"""A class representing both a stream and a filter.
 
 	The outgoing stream is represented by the attribute 'iterable'.
 
-	The processor is represented by  the method __call__(inpipe), which
-	combines self's iterable with inpipe's, returning a new iterable
+	The filter is represented by  the method __call__(inpipe), which
+	combines self's iterator with inpipe's, returning a new iterator
 	representing a new outgoing stream.
 	
 	A Stream subclass will usually implement __call__, unless it is an
@@ -174,34 +179,38 @@ class Stream(collections.Iterable):
 	>>> [1, 2, 3] >> Stream('foo') >> Stream('bar') >> list
 	[1, 2, 3, 'f', 'o', 'o', 'b', 'a', 'r']
 	"""
-	__slots__ = 'iterable'
+	__slots__ = 'iterator'
 
-	def __init__(self, iterable=[]):
-		"""Make a stream object from an iterable"""
-		self.iterable= iterable if iterable else []
+	def __init__(self, iterable=None):
+		"""Make a stream object from an interable"""
+		self.iterator = iter(iterable if iterable else [])
 
 	def __iter__(self):
-		return iter(self.iterable)
+		return self.iterator
+
+	def next(self):
+		return next(self.iterator)
 
 	def __call__(self, inpipe):
-		"""Append to the end of inpipe(it had better terminate!)."""
-		return itertools.chain(inpipe, self.iterable)
+		"""Append to the end of inpipe (it had better terminate!)."""
+		return itertools.chain(inpipe, self.iterator)
 
 	def __pipe__(self, inpipe):
-		self.iterable = self.__call__(iter(inpipe))
+		self.iterator = self.__call__(inpipe)
 		return self
 
 	@staticmethod
 	def pipe(inpipe, outpipe):
 		if hasattr(outpipe, '__pipe__'):
-			return outpipe.__pipe__(inpipe)
+			return outpipe.__pipe__(iter(inpipe))
 		elif hasattr(outpipe, '__call__'):
 			if hasattr(outpipe, '__name__') and outpipe.__name__ == 'list':
-				return outpipe(iter(inpipe))	## God knows why this happens ##
+				## For some reason `list` doesn't believe that inpipe is an iterator
+				return outpipe(iter(inpipe))
 			else:
 				return outpipe(inpipe)
 		else:
-			raise BrokenPipeError('No connection mechanism defined')
+			raise BrokenPipe('No connection mechanism defined')
 
 	def __rshift__(self, outpipe):
 		return Stream.pipe(self, outpipe)
@@ -213,9 +222,9 @@ class Stream(collections.Iterable):
 		"""
 		Similar to __pipe__, except for the fact that both
 		self and inpipe must be Stream instances, in which case
-		inpipe.iterable is modified in place.
+		inpipe.iterator is modified in place.
 		"""
-		inpipe.iterable = self.__call__(inpipe.iterable)
+		inpipe.iterator = self.__call__(inpipe.iterator)
 		return inpipe
 
 	@staticmethod
@@ -231,10 +240,10 @@ class Stream(collections.Iterable):
 		>>> Stream(range(20)) >> len
 		20
 		"""
-		return len(list(self.iterable))
+		return len(list(self.iterator))
 
 	def __repr__(self):
-		return 'Stream(%s)' % repr(self.iterable)
+		return 'Stream(%s)' % repr(self.iterator)
 
 
 #_______________________________________________________________________
@@ -256,32 +265,36 @@ class take(Stream):
 	>>> gseq(2) >> take(0, 16, 2)
 	Stream([1, 4, 16, 64, 256, 1024, 4096, 16384])
 	"""
-	__slots__ = 'slice'
+	__slots__ = 'items', 'slice'
 
 	def __init__(self, *args):
 		super(take, self).__init__()
 		self.slice = slice(*args)
+		self.items = []
 
 	def __call__(self, inpipe):
 		if negative(self.slice.stop) or negative(self.slice.start) \
 		or not (self.slice.start or self.slice.stop) \
 		or (not self.slice.start and negative(self.slice.step)) \
 		or (not self.slice.stop and not negative(self.slice.step)):
-			self.iterable = list(inpipe)		## force all evaluation 	##
-		else:							## force some evaluation ##
+			## force all evaluation ##
+			self.items = list(inpipe)
+		else:
+			## force some evaluation ##
 			if negative(self.slice.step):
 				stop = self.slice.start
 			else:
 				stop = self.slice.stop
 			try:
-				self.iterable =  [next(inpipe) for _ in xrange(stop)]
+				self.items =  [next(inpipe) for _ in xrange(stop)]
 			except StopIteration:
 				pass
-		self.iterable = self.iterable[self.slice]
-		return self.iterable
+		self.items = self.items[self.slice]
+		self.iterator = iter(self.items)
+		return self.items
 
 	def __repr__(self):
-		return 'Stream(%s)' % repr(self.iterable)
+		return 'Stream(%s)' % repr(self.items)
 
 takeall = take(None)
 
@@ -320,11 +333,11 @@ class itemtaker(take):
 		return getter
 
 	def __pipe__(self, inpipe):
-		super(itemtaker, self).__call__(iter(inpipe))
+		super(itemtaker, self).__call__(inpipe)
 		if self.get1:
-			return self.iterable[-1]
+			return self.items[-1]
 		else:
-			return self.iterable
+			return self.items
 
 	def __repr__(self):
 		return '<itemtaker at %s>' % hex(id(self))
@@ -546,7 +559,7 @@ class prepend(Stream):
 	"""
 	def __call__(self, inpipe):
 		"""Prepend at the beginning of inpipe"""
-		return itertools.chain(self.iterable, inpipe)
+		return itertools.chain(self.iterator, inpipe)
 
 
 class tee(Stream):
@@ -570,7 +583,7 @@ class tee(Stream):
 		branch1, branch2 = itertools.tee(iter(inpipe))
 		Stream.pipe(branch1, self.streamobj)
 		if isinstance(inpipe, Stream):
-			inpipe.iterable = branch2
+			inpipe.iterator = branch2
 			return inpipe
 		else:
 			return Stream(branch2)

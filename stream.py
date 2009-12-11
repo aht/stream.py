@@ -113,6 +113,7 @@ __author__ = 'Anh Hai Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
 __all__ = [
 	'Stream',
+	'Filter',
 	'take',
 	'takeall',
 	'item',
@@ -453,17 +454,20 @@ class dropi(Stream):
 #_______________________________________________________________________
 
 
-class FunctionFilter(Stream):
+class Filter(Stream):
 	"""Base class for stream filter based on a function"""
 
 	__slots__ = 'function'
 
 	def __init__(self, function):
-		super(FunctionFilter, self).__init__()
+		super(Filter, self).__init__()
 		self.function = function
+	
+	def __call__(self, inpipe):
+		return self.function(inpipe)
 
 
-class apply(FunctionFilter):
+class apply(Filter):
 	"""Invoke a function using each stream element as a list of arguments, 
 	a la itertools.starmap.
 	"""
@@ -471,7 +475,7 @@ class apply(FunctionFilter):
 		return itertools.starmap(self.function, inpipe)
 
 
-class map(FunctionFilter):
+class map(Filter):
 	def __call__(self, inpipe):
 		return itertools.imap(self.function, inpipe)
 
@@ -496,7 +500,7 @@ class itemcutter(map):
 cut = itemcutter()
 
 
-class filter(FunctionFilter):
+class filter(Filter):
 	"""
 	>>> even = lambda x: x%2 == 0
 	>>> xrange(1, 40, 3) >> filter(even) >> list
@@ -506,17 +510,17 @@ class filter(FunctionFilter):
 		return itertools.ifilter(self.function, inpipe)
 
 
-class takewhile(FunctionFilter):
+class takewhile(Filter):
 	def __call__(self, inpipe):
 		return itertools.takewhile(self.function, inpipe)
 
 
-class dropwhile(FunctionFilter):
+class dropwhile(Filter):
 	def __call__(self, inpipe):
 		return itertools.dropwhile(self.function, inpipe)
 
 
-class fold(FunctionFilter):
+class fold(Filter):
 	"""
 	Combines the elements of inpipe by applying a function of two
 	argument to a value and each element in turn.  At each step,

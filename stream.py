@@ -3,7 +3,7 @@
 Introduction
 ============
 
-Streams are generalized iterables with a pipelining mechanism to enable
+Streams are generalized iterators with a pipelining mechanism to enable
 data-flow programming.
 
 The idea is to take the output of a function that turn an iterable into
@@ -11,25 +11,20 @@ another iterable and plug that as the input of another such function.
 While you can already do this using function composition, this package
 provides an elegant notation for it by overloading the '>>' operator.
 
-A pipeline usually starts with a generator, then passes through a number
-of processors.  Multiple streams can be branched and combined.  Finally,
-the output is fed to an accumulator, which can be any function of one
-iterable argument.
-
 This approach focuses the programming on processing streams of data, step
 by step.  A pipeline usually starts with a generator, then passes through
-a number of processors.  Multiple streams can be branched and combined.
+a number of filters.  Multiple streams can be branched and combined.
 Finally, the output is fed to an accumulator, which can be any function
 of one iterable argument.
 
 **Generators**:  anything iterable
 	+ from this module:  seq, gseq, repeatcall, chaincall
 
-**Processors**:
+**Filters**:
 	+ by index:  take, drop, cut
 	+ by condition:  filter, takewhile, dropwhile
 	+ by transformation:  map, apply, fold
-	+ special purpose:  attrgetter, methodcaller, splitter
+	+ special purpose:  attrgetter, itemgetter, methodcaller, splitter
 
 **Combinators**:  prepend, takei, dropi, tee, flatten
 
@@ -38,7 +33,7 @@ of one iterable argument.
 
 take() and item[] work similarly, except for notation and the fact that
 item[] returns a list whereas take() returns a stream which can be further
-piped to another processor.
+piped to another filter.
 
 Values are computed only when an accumulator forces some or all evaluation
 (not when the stream are set up).
@@ -50,10 +45,12 @@ Better itertools.slice
 ----------------------
 ::
 
-  from itertools import count
-  c = count()
-  c >> item[1:10:2]  #-> [1, 3, 5, 7, 9]
-  c >> item[:5]      #-> [10, 11, 12, 13, 14]
+  >>> from itertools import count
+  >>> c = count()
+  >>> c >> item[1:10:2]
+  [1, 3, 5, 7, 9]
+  >>> c >> item[:5]
+  [10, 11, 12, 13, 14]
 
 String processing
 -----------------
@@ -61,10 +58,10 @@ Grep some lines matching a regex from a file, cut out the 4th field
 separated by ' ', ':' or '.', strip leading zeroes, then save as a list::
 
     import re
-    s = open('file').xreadlines() \
+    s = open('file') \
       >> filter(re.compile(regex).search) \
       >> map(splitter(' |:|\.')) \
-      >> cut[3] \
+      >> map(itemgetter(3)) \
       >> map(methodcaller('lstrip', '0')) \
       >> list
 
@@ -72,8 +69,8 @@ Partial sums
 ------------
 Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ..::
 
-    gseq(0.5) >> fold(lambda x, y: x+y) >> item[:5]
-    #->[1, 1.5, 1.75, 1.875, 1.9375]
+    >>> gseq(0.5) >> fold(operator.add) >> item[:5]
+    [1, 1.5, 1.75, 1.875, 1.9375]
 
 Random Walk in 2D
 -----------------
@@ -81,34 +78,39 @@ Generate an infinite stream of coordinates representing the position of
 a random walker in 2D::
 
     from random import choice
-    vectoradd = lambda u,v: zip(u, v) >> map(sum) >> list
-    rw = lambda: repeatcall(choice, [[1,0], [0,1], [-1,0], [0,-1]]) >> fold(vectoradd, [0, 0])
+    vectoradd = lambda u,v: zip(u, v) >> apply(operator.add) >> list
+    directions = [[1,0], [0,1], [-1,0], [0,-1]]
+    rw = lambda: repeatcall(choice, directions) >> fold(vectoradd, [0, 0])
+
+Calling choice repeatedly yields the series of unit vectors representing the
+directions that the walker takes, then these vectors are gradually added to get
+a series of coordinates.
+
+To instantiate a random-walk, and get the first 10 coordinates::
+
     walk = rw()
-    walk >> take(10)
-    #->Stream([[0, 0], ...])
+    walk >> item[:10]
 
-Here calling choice repeatedly yields the series of unit vectors
-representing the directions that the walker takes, then these vectors
-are gradually added to get a series of coordinates.
-
-What is the farthest point that he wanders upto the first return to the
-origin?::
+Question: what is the farthest point that the walker wanders upto the first
+return to the origin? (Note that he might never return at all!)::
 
     vectorlen = lambda v: v >> map(lambda x: x**2) >> sum
     rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> maximum(key=vectorlen)
 
-Note that this might not terminate!  The first coordinate which is [0, 0]
-needs to be dropped otherwise takewhile will truncate immediately.
+The first coordinate [0, 0], which is the origin, needs to be dropped otherwise
+takewhile will truncate immediately.
 
-We can also probe into the stream, like this::
+We can also probe into the walker's chosen path::
 
-    probe = takeall
+    probe = Stream()
     rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> tee(probe) >> maximum(key=vectorlen)
-    probe
-    #->Stream([[0, 0], ...])
+
+Now you can see his exact coordinates, for example the first 10 are::
+
+	probe >> item[:10]
 """
 
-__version__ = '0.5.2'
+__version__ = '0.6'
 __author__ = 'Anh Hai Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
 __all__ = [
@@ -158,7 +160,7 @@ from operator import itemgetter, attrgetter, methodcaller
 
 #_____________________________________________________________________
 #
-# Base class for stream processor
+# Base class for Stream
 #_____________________________________________________________________
 
 class BrokenPipe(Exception): pass
@@ -167,7 +169,7 @@ class BrokenPipe(Exception): pass
 class Stream(collections.Iterator):
 	"""A class representing both a stream and a filter.
 
-	The outgoing stream is represented by the attribute 'iterable'.
+	The outgoing stream is represented by the attribute 'iterator'.
 
 	The filter is represented by  the method __call__(inpipe), which
 	combines self's iterator with inpipe's, returning a new iterator
@@ -250,7 +252,7 @@ class Stream(collections.Iterator):
 
 #_______________________________________________________________________
 #
-# Simple taking and dropping elements
+# Filtering streams by element indices
 #_______________________________________________________________________
 
 
@@ -383,7 +385,7 @@ class takei(Stream):
 	def __call__(self, inpipe):
 		def genfunc():
 			old_idx = -1
-			idx = next(self.indexiter)	# next value to yield
+			idx = next(self.indexiter)			# next value to yield
 			counter = seq()
 			while 1:
 				c = next(counter)
@@ -449,7 +451,7 @@ class dropi(Stream):
 				except StopIteration:		
 					return -1, True
 			old_idx = -1
-			idx, exhausted = try_next_idx()			# next value to discard
+			idx, exhausted = try_next_idx()				# next value to discard
 			while 1:
 				c =next(counter)
 				elem = next(inpipe)
@@ -465,7 +467,7 @@ class dropi(Stream):
 
 #_______________________________________________________________________
 #
-# Functional processing
+# Filtering streams with functions and higher-order ones
 #_______________________________________________________________________
 
 
@@ -544,7 +546,7 @@ class fold(Filter):
 	
 	This example calculate partial sums of the series 1+1/2+1/4+...
 
-	>>> gseq(0.5) >> fold(lambda x, y: x+y) >> item[:5]
+	>>> gseq(0.5) >> fold(operator.add) >> item[:5]
 	[1, 1.5, 1.75, 1.875, 1.9375]
 	"""
 	def __init__(self, function, initval=None):
@@ -566,7 +568,7 @@ class fold(Filter):
 
 #_____________________________________________________________________
 #
-# Stream combinators
+# Combining streams
 #_____________________________________________________________________
 
 
@@ -609,7 +611,7 @@ class tee(Stream):
 
 #_______________________________________________________________________
 #
-# Nested streams processing
+# Filtering nested streams
 #_______________________________________________________________________
 
 

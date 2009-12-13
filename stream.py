@@ -12,12 +12,12 @@ While you can already do this using function composition, this package
 provides an elegant notation for it by overloading the '>>' operator.
 
 This approach focuses the programming on processing streams of data, step
-by step.  A pipeline usually starts with a generator, then passes through
+by step.  A pipeline usually starts with a producer, then passes through
 a number of filters.  Multiple streams can be branched and combined.
 Finally, the output is fed to an accumulator, which can be any function
 of one iterable argument.
 
-**Generators**:  anything iterable
+**Producers**:  anything iterable
 	+ from this module:  seq, gseq, repeatcall, chaincall
 
 **Filters**:
@@ -30,10 +30,6 @@ of one iterable argument.
 
 **Accumulators**:  item, maximum, minimum, reduce
 	+ from Python:  list, sum, dict, max, min ...
-
-take() and item[] work similarly, except for notation and the fact that
-item[] returns a list whereas take() returns a stream which can be further
-piped to another filter.
 
 Values are computed only when an accumulator forces some or all evaluation
 (not when the stream are set up).
@@ -110,43 +106,9 @@ Now you can see his exact coordinates, for example the first 10 are::
 	probe >> item[:10]
 """
 
-__version__ = '0.6'
+__version__ = '0.6.1'
 __author__ = 'Anh Hai Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
-__all__ = [
-	'Stream',
-	'Filter',
-	'take',
-	'takeall',
-	'item',
-	'takei',
-	'drop',
-	'dropi',
-	'apply',
-	'map',
-	'cut',
-	'filter',
-	'fold',
-	'takewhile',
-	'dropwhile',
-	'tee',
-	'prepend',
-	'flatten',
-	'zipwith',
-	'seq',
-	'gseq',
-	'repeatcall',
-	'chaincall',
-	'itemgetter',
-	'attrgetter',
-	'methodcaller',
-	'splitter',
-	'maximum',
-	'minimum',
-	'reduce',
-	'itertools',
-	'operator',
-]
 
 import __builtin__
 import collections
@@ -255,55 +217,31 @@ class Stream(collections.Iterator):
 # Filtering streams by element indices
 #_______________________________________________________________________
 
-
-negative = lambda x: x and x<0		### since None < 0 == True
-
-
 class take(Stream):
-	"""Force some or all evaluation and use slice-like arguments to select elements.
-	Return a Stream.
+	"""Return a Stream of n items taken from the input stream.
 	
 	>>> seq(1, 2) >> take(10)
 	Stream([1, 3, 5, 7, 9, 11, 13, 15, 17, 19])
-
-	>>> gseq(2) >> take(0, 16, 2)
-	Stream([1, 4, 16, 64, 256, 1024, 4096, 16384])
 	"""
-	__slots__ = 'items', 'slice'
+	__slots__ = 'items', 'n'
 
-	def __init__(self, *args):
+	def __init__(self, n):
 		super(take, self).__init__()
-		self.slice = slice(*args)
+		self.n = n
 		self.items = []
 
 	def __call__(self, inpipe):
-		if negative(self.slice.stop) or negative(self.slice.start) \
-		or not (self.slice.start or self.slice.stop) \
-		or (not self.slice.start and negative(self.slice.step)) \
-		or (not self.slice.stop and not negative(self.slice.step)):
-			## force all evaluation ##
-			self.items = list(inpipe)
-		else:
-			## force some evaluation ##
-			if negative(self.slice.step):
-				stop = self.slice.start
-			else:
-				stop = self.slice.stop
-			try:
-				self.items =  [next(inpipe) for _ in xrange(stop)]
-			except StopIteration:
-				pass
-		self.items = self.items[self.slice]
-		self.iterator = iter(self.items)
+		self.items =  [next(inpipe) for _ in xrange(self.n)]
 		return self.items
 
 	def __repr__(self):
 		return 'Stream(%s)' % repr(self.items)
 
-takeall = take(None)
+
+negative = lambda x: x and x<0		### since None < 0 == True
 
 
-class itemtaker(take):
+class itemtaker(Stream):
 	"""
 	Implement Python slice notation for take. Return a list.
 
@@ -312,8 +250,6 @@ class itemtaker(take):
 	[0, 2, 4, 6, 8]
 	>>> a >> item[:5]
 	[10, 11, 12, 13, 14]
-	>>> xrange(20) >> item[10]
-	10
 	>>> xrange(20) >> item[-5]
 	15
 	>>> xrange(20) >> item[-1]
@@ -321,19 +257,18 @@ class itemtaker(take):
 	>>> xrange(20) >> item[::-2]
 	[19, 17, 15, 13, 11, 9, 7, 5, 3, 1]
 	"""
-	__slots__ = 'get1'
+	__slots__ = 'slice', 'get1'
 
-	def __init__(self):
-		self.get1 = False
+	def __init__(self, slice=None, get1=False):
+		self.slice = slice
+		self.get1 = get1
 
 	@classmethod
 	def __getitem__(cls, sliceobj):
-		getter = cls()
 		if type(sliceobj) is type(1):
-			getter.get1 = True
-			getter.slice = slice(sliceobj)
+			getter = cls(slice(sliceobj), True)
 		elif type(sliceobj) is type(slice(1)):
-			getter.slice = sliceobj
+			getter = cls(sliceobj, False)
 		else:
 			raise TypeError('index must be an integer or a slice')
 		return getter
@@ -353,14 +288,30 @@ class itemtaker(take):
 				items = collections.deque(itertools.islice(inpipe, None), maxlen=n)
 				return items[-n]
 		else:
-			## a list is needed, we delegate to superclass
-			super(itemtaker, self).__call__(inpipe)
-			return self.items
+			## a list is needed
+			if negative(self.slice.stop) or negative(self.slice.start) \
+				or not (self.slice.start or self.slice.stop) \
+				or (not self.slice.start and negative(self.slice.step)) \
+				or (not self.slice.stop and not negative(self.slice.step)):
+				# force all evaluation
+				items = list(inpipe)
+			else:
+				# force some evaluation
+				if negative(self.slice.step):
+					stop = self.slice.start
+				else:
+					stop = self.slice.stop
+				try:
+					items = [next(inpipe) for _ in xrange(stop)]
+				except StopIteration:
+					pass
+			return items[self.slice]
 
 	def __repr__(self):
 		return '<itemtaker at %s>' % hex(id(self))
 
 item = itemtaker()
+
 
 class takei(Stream):
 	"""Select elements of the incoming stream by a stream of indexes.

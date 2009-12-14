@@ -1,4 +1,5 @@
 README
-LICENSE
 setup.py
 stream.py
+example/feeder.py
+example/pi.py

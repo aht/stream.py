@@ -34,6 +34,13 @@ of one iterable argument.
 Values are computed only when an accumulator forces some or all evaluation
 (not when the stream are set up).
 
+When a producer is doing blocking I/O, it is possible to use a ThreadedFeeder
+or ForkedFeeder to improve performance.  The feeder will start a thread or
+process to run the producer and feed genereated items to a cache, minimizing
+the time that the whole pipeline has to wait when the producer is blocking in
+system calls.
+
+
 Examples
 ========
 
@@ -56,7 +63,7 @@ separated by ' ', ':' or '.', strip leading zeroes, then save as a list::
     import re
     s = open('file') \
       >> filter(re.compile(regex).search) \
-      >> map(splitter(' |:|\.')) \
+      >> map(re.compile(' |:|\.').split) \
       >> map(itemgetter(3)) \
       >> map(methodcaller('lstrip', '0')) \
       >> list
@@ -106,7 +113,7 @@ Now you can see his exact coordinates, for example the first 10 are::
 	probe >> item[:10]
 """
 
-__version__ = '0.6.1'
+__version__ = '0.7'
 __author__ = 'Anh Hai Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
 
@@ -612,6 +619,100 @@ class zipwith(Stream):
 
 	def __call__(self, inpipe):
 		return itertools.izip(*([inpipe] + self.iterables))
+
+
+#_____________________________________________________________________
+#
+# Buffered stream using a threaded or forked feeder, parallel map
+#_____________________________________________________________________
+
+
+import threading
+import multiprocessing as mp
+from Queue import Queue
+
+
+class ThreadedFeeder(collections.Iterator):
+	__slots__ = 'thread', 'queue'
+
+	def __init__(self, generator, size=0):
+		"""Create a feeder that start the given generator in a separate thread and
+		put items into queue with a specified size (default to infinity).
+
+		The feeder will act as an eagerly evaluating proxy of the generator.
+
+		This should improve performance when the generator often blocks in
+		system calls.  Note that the GIL might make threading performance worse in
+		multi-processor machines.
+		"""
+		self.queue = Queue(size)
+		def feeder():
+			i = generator()
+			while 1:
+				try:
+					self.queue.put(next(i))
+				except StopIteration:
+					self.queue.put(StopIteration)
+					break
+		self.thread = threading.Thread(target=feeder)
+		self.thread.start()
+
+	def __iter__(self):
+		return self
+
+	def next(self):
+		item = self.queue.get()
+		if item is StopIteration:
+			raise item
+		else:
+			return item
+
+	def __len__(self):
+		return len([i for i in self])
+
+	def __repr__(self):
+		return '<ThreadedFeeder at %s>' % hex(id(self))
+
+
+class ForkedFeeder(collections.Iterator):
+	__slots__ = 'process', 'receiver'
+
+	def __init__(self, generator):
+		"""Create a feeder that start the given generator in a child process which
+		sends results back to the parent.
+
+		The feeder will act as an eagerly evaluating proxy of the generator.
+
+		This should improve performance when the generator often blocks in
+		system calls.  Note that serialization could be costly.
+		"""
+		self.receiver, sender = mp.Pipe(duplex=False)
+		def feeder():
+			i = generator()
+			while 1:
+				try:
+					sender.send(next(i))
+				except StopIteration:
+					sender.send(StopIteration)
+					break
+		self.process = mp.Process(target=feeder)
+		self.process.start()
+
+	def __iter__(self):
+		return self
+
+	def next(self):
+		item = self.receiver.recv()
+		if item is not StopIteration:
+			return item
+		else:
+			raise item
+
+	def __len__(self):
+		return len([i for i in self])
+
+	def __repr__(self):
+		return '<ForkedFeeder at %s>' % hex(id(self))
 
 
 #_____________________________________________________________________

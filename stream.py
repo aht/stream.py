@@ -213,7 +213,7 @@ class Stream(collections.Iterator):
 		>>> Stream(range(20)) >> len
 		20
 		"""
-		return len(list(self.iterator))
+		return len([i for i in self.iterator])
 
 	def __repr__(self):
 		return 'Stream(%s)' % repr(self.iterator)
@@ -301,7 +301,7 @@ class itemtaker(Stream):
 				or (not self.slice.start and negative(self.slice.step)) \
 				or (not self.slice.stop and not negative(self.slice.step)):
 				# force all evaluation
-				items = list(inpipe)
+				items = [i for i in inpipe]
 			else:
 				# force some evaluation
 				if negative(self.slice.step):

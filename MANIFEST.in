@@ -1,5 +1,2 @@
-README
-LICENSE
-setup.py
-stream.py
+include LICENSE
 include example/*.py

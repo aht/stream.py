@@ -623,7 +623,7 @@ class zipwith(Stream):
 
 #_____________________________________________________________________
 #
-# Buffered stream using a threaded or forked feeder, parallel map
+# Threaded/forked feeder
 #_____________________________________________________________________
 
 
@@ -635,19 +635,21 @@ from Queue import Queue
 class ThreadedFeeder(collections.Iterator):
 	__slots__ = 'thread', 'queue'
 
-	def __init__(self, generator, size=0):
-		"""Create a feeder that start the given generator in a separate thread and
-		put items into queue with a specified size (default to infinity).
+	def __init__(self, generator, *args, **kwargs):
+		"""Create a feeder that start the given generator with
+		*args and **kwargs in a separate thread and put
+		generated items into a Queue.
 
-		The feeder will act as an eagerly evaluating proxy of the generator.
+		The feeder will act as an eagerly evaluating proxy of
+		the generator.
 
-		This should improve performance when the generator often blocks in
-		system calls.  Note that the GIL might make threading performance worse in
-		multi-processor machines.
+		This should improve performance when the generator
+		often blocks in system calls.  Note that the GIL might
+		effect threading performance.
 		"""
-		self.queue = Queue(size)
+		self.queue = Queue()
 		def feeder():
-			i = generator()
+			i = generator(*args, **kwargs)
 			while 1:
 				try:
 					self.queue.put(next(i))
@@ -667,9 +669,6 @@ class ThreadedFeeder(collections.Iterator):
 		else:
 			return item
 
-	def __len__(self):
-		return len([i for i in self])
-
 	def __repr__(self):
 		return '<ThreadedFeeder at %s>' % hex(id(self))
 
@@ -677,14 +676,17 @@ class ThreadedFeeder(collections.Iterator):
 class ForkedFeeder(collections.Iterator):
 	__slots__ = 'process', 'receiver'
 
-	def __init__(self, generator):
-		"""Create a feeder that start the given generator in a child process which
-		sends results back to the parent.
+	def __init__(self, generator, *args, **kwargs):
+		"""Create a feeder that start the given generator with
+		*args and **kwagrs in a child process which sends
+		results back to the parent.
 
-		The feeder will act as an eagerly evaluating proxy of the generator.
+		The feeder will act as an eagerly evaluating proxy of
+		the generator.
 
-		This should improve performance when the generator often blocks in
-		system calls.  Note that serialization could be costly.
+		This should improve performance when the generator
+		often blocks in system calls.  Note that serialization
+		could be costly.
 		"""
 		self.receiver, sender = mp.Pipe(duplex=False)
 		def feeder():
@@ -707,9 +709,6 @@ class ForkedFeeder(collections.Iterator):
 			return item
 		else:
 			raise item
-
-	def __len__(self):
-		return len([i for i in self])
 
 	def __repr__(self):
 		return '<ForkedFeeder at %s>' % hex(id(self))

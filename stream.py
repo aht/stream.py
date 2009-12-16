@@ -152,8 +152,6 @@ class Stream(collections.Iterator):
 	>>> [1, 2, 3] >> Stream('foo') >> Stream('bar') >> list
 	[1, 2, 3, 'f', 'o', 'o', 'b', 'a', 'r']
 	"""
-	__slots__ = 'iterator'
-
 	def __init__(self, iterable=None):
 		"""Make a stream object from an interable"""
 		self.iterator = iter(iterable if iterable else [])
@@ -230,8 +228,6 @@ class take(Stream):
 	>>> seq(1, 2) >> take(10)
 	Stream([1, 3, 5, 7, 9, 11, 13, 15, 17, 19])
 	"""
-	__slots__ = 'items', 'n'
-
 	def __init__(self, n):
 		super(take, self).__init__()
 		self.n = n
@@ -264,8 +260,6 @@ class itemtaker(Stream):
 	>>> xrange(20) >> item[::-2]
 	[19, 17, 15, 13, 11, 9, 7, 5, 3, 1]
 	"""
-	__slots__ = 'slice', 'get1'
-
 	def __init__(self, slice=None, get1=False):
 		self.slice = slice
 		self.get1 = get1
@@ -331,8 +325,6 @@ class takei(Stream):
 	>>> xrange(15) >> takei([3, -2, 7, 7]) >> list
 	[3, 7]
 	"""
-	__slots__ = 'indexiter'
-
 	def __init__(self, indices):
 		"""indexes should be non-negative integers in monotonically
 		increasing order (bad values won't yield)
@@ -363,8 +355,6 @@ class drop(Stream):
 	>>> seq(0, 2) >> drop(1) >> take(5)
 	Stream([2, 4, 6, 8, 10])
 	"""
-	__slots__ = 'n'
-	
 	def __init__(self, n):
 		"""n: the number of elements to be dropped"""
 		super(drop, self).__init__()
@@ -387,8 +377,6 @@ class dropi(Stream):
 	>>> xrange(11) >> dropi([]) >> list
 	[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 	"""
-	__slot__ = 'indexiter'
-
 	def __init__(self, indices):
 		"""indexes: a stream of the indexs of element to be selected.
 
@@ -431,9 +419,6 @@ class dropi(Stream):
 
 class Filter(Stream):
 	"""Base class for stream filter based on a function"""
-
-	__slots__ = 'function'
-
 	def __init__(self, function):
 		super(Filter, self).__init__()
 		self.function = function
@@ -551,8 +536,6 @@ class tee(Stream):
 	>>> foo >> item[:5]
 	[0, 6, 12, 18, 24]
 	"""
-	__slots__ = 'streamobj',
-
 	def __init__(self, streamobj):
 		super(tee, self).__init__()
 		self.streamobj = streamobj
@@ -612,7 +595,7 @@ class zipwith(Stream):
 	>>> range(10) >> zipwith(range(10, 20), range(20,30)) >> take(5)
 	Stream([(0, 10, 20), (1, 11, 21), (2, 12, 22), (3, 13, 23), (4, 14, 24)])
 	"""
-	__slots__ = 'iterables'
+
 	def __init__(self, *iterables):
 		super(zipwith, self).__init__()
 		self.iterables = list(iterables)
@@ -633,8 +616,6 @@ from Queue import Queue
 
 
 class ThreadedFeeder(collections.Iterator):
-	__slots__ = 'thread', 'queue'
-
 	def __init__(self, generator, *args, **kwargs):
 		"""Create a feeder that start the given generator with
 		*args and **kwargs in a separate thread and put
@@ -674,8 +655,6 @@ class ThreadedFeeder(collections.Iterator):
 
 
 class ForkedFeeder(collections.Iterator):
-	__slots__ = 'process', 'receiver'
-
 	def __init__(self, generator, *args, **kwargs):
 		"""Create a feeder that start the given generator with
 		*args and **kwagrs in a child process which sends

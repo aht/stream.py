@@ -615,6 +615,29 @@ import multiprocessing as mp
 from Queue import Queue
 
 
+### Helper generator functions
+
+def _iterqueue(queue):
+	"""Return a generator that yield items from a queue"""
+	while 1:
+		item = queue.get()
+		if item is StopIteration:
+			break
+		else:
+			yield item
+	raise StopIteration
+
+def _iterrecv(receiver):
+	"""Return a generator that receive items from whatever that hasattr('recv')"""
+	while 1:
+		item = receiver.recv()
+		if item is StopIteration:
+			break
+		else:
+			yield item
+	raise StopIteration
+
+
 class ThreadedFeeder(collections.Iterator):
 	def __init__(self, generator, *args, **kwargs):
 		"""Create a feeder that start the given generator with
@@ -639,16 +662,7 @@ class ThreadedFeeder(collections.Iterator):
 					break
 		self.thread = threading.Thread(target=feeder)
 		self.thread.start()
-
-	def __iter__(self):
-		return self
-
-	def next(self):
-		item = self.queue.get()
-		if item is StopIteration:
-			raise item
-		else:
-			return item
+		self.next = _iterqueue(self.queue).next
 
 	def __repr__(self):
 		return '<ThreadedFeeder at %s>' % hex(id(self))
@@ -667,7 +681,7 @@ class ForkedFeeder(collections.Iterator):
 		often blocks in system calls.  Note that serialization
 		could be costly.
 		"""
-		self.receiver, sender = mp.Pipe(duplex=False)
+		receiver, sender = mp.Pipe(duplex=False)
 		def feeder():
 			i = generator()
 			while 1:
@@ -678,16 +692,7 @@ class ForkedFeeder(collections.Iterator):
 					break
 		self.process = mp.Process(target=feeder)
 		self.process.start()
-
-	def __iter__(self):
-		return self
-
-	def next(self):
-		item = self.receiver.recv()
-		if item is not StopIteration:
-			return item
-		else:
-			raise item
+		self.next = _iterrecv(receiver).next
 
 	def __repr__(self):
 		return '<ForkedFeeder at %s>' % hex(id(self))

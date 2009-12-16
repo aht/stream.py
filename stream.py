@@ -40,6 +40,9 @@ process to run the producer and feed genereated items to a cache, minimizing
 the time that the whole pipeline has to wait when the producer is blocking in
 system calls.
 
+For an article on the module's moltivation and implementation, see
+this blog post: <http://blog.onideas.ws/stream.py>.
+
 
 Examples
 ========
@@ -234,7 +237,7 @@ class take(Stream):
 		self.items = []
 
 	def __call__(self, inpipe):
-		self.items =  [next(inpipe) for _ in xrange(self.n)]
+		self.items =  list(itertools.islice(inpipe, self.n))
 		return self.items
 
 	def __repr__(self):

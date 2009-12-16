@@ -700,6 +700,66 @@ class ForkedFeeder(collections.Iterator):
 
 #_____________________________________________________________________
 #
+# Threaded/forked Filter
+#_____________________________________________________________________
+
+
+class ThreadedFilter(Filter):
+	def __init__(self, function):
+		"""
+		>>> xrange(100) >> ThreadedFilter(lambda s: s >> map(lambda x: x*x)) >> reduce(operator.add)
+		328350
+		"""
+		super(ThreadedFilter, self).__init__(function)
+		self.queue = Queue()
+		self.iterator = _iterqueue(self.queue)
+	
+	def __call__(self, inpipe):
+		def worker():
+			i = self.function(inpipe)
+			while 1:
+				try:
+					self.queue.put(next(i))
+				except StopIteration:
+					self.queue.put(StopIteration)
+					break
+		self.thread = threading.Thread(target=worker)
+		self.thread.start()
+		return self.iterator
+
+	def __repr__(self):
+		return '<ThreadedFilter at %s>' % hex(id(self))
+
+
+class ForkedFilter(Filter):
+	def __init__(self, function):
+		"""
+		>>> xrange(100) >> ForkedFilter(lambda s: s >> map(lambda x: x*x)) >> reduce(operator.add)
+		328350
+		"""
+		super(ForkedFilter, self).__init__(function)
+		self.receiver, self.sender = mp.Pipe(duplex=False)
+		self.iterator = _iterrecv(self.receiver)
+	
+	def __call__(self, inpipe):
+		def worker():
+			i = self.function(inpipe)
+			while 1:
+				try:
+					self.sender.send(next(i))
+				except StopIteration:
+					self.sender.send(StopIteration)
+					break
+		self.process = mp.Process(target=worker)
+		self.process.start()
+		return self.iterator
+
+	def __repr__(self):
+		return '<ForkedFilter at %s>' % hex(id(self))
+
+
+#_____________________________________________________________________
+#
 # Useful ultilities
 #_____________________________________________________________________
 

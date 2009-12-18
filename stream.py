@@ -784,4 +784,6 @@ def reduce(function, initval=None):
 
 if __name__ == "__main__":
 	import doctest
-	doctest.testmod()
+	if doctest.testmod().failed:
+		import sys
+		sys.exit(1)

@@ -628,7 +628,6 @@ def _iterqueue(queue):
 			break
 		else:
 			yield item
-	raise StopIteration
 
 def _iterrecv(receiver):
 	"""Return a generator that receive items from whatever that hasattr('recv')"""
@@ -638,10 +637,9 @@ def _iterrecv(receiver):
 			break
 		else:
 			yield item
-	raise StopIteration
 
 
-class ThreadedFeeder(collections.Iterator):
+class ThreadedFeeder(collections.Iterable):
 	def __init__(self, generator, *args, **kwargs):
 		"""Create a feeder that start the given generator with
 		*args and **kwargs in a separate thread and put
@@ -665,13 +663,15 @@ class ThreadedFeeder(collections.Iterator):
 					break
 		self.thread = threading.Thread(target=feeder)
 		self.thread.start()
-		self.next = _iterqueue(self.queue).next
+	
+	def __iter__(self):
+		return _iterqueue(self.queue)
 
 	def __repr__(self):
 		return '<ThreadedFeeder at %s>' % hex(id(self))
 
 
-class ForkedFeeder(collections.Iterator):
+class ForkedFeeder(collections.Iterable):
 	def __init__(self, generator, *args, **kwargs):
 		"""Create a feeder that start the given generator with
 		*args and **kwagrs in a child process which sends
@@ -684,18 +684,20 @@ class ForkedFeeder(collections.Iterator):
 		often blocks in system calls.  Note that serialization
 		could be costly.
 		"""
-		receiver, sender = mp.Pipe(duplex=False)
+		self.reader, writer = mp.Pipe(duplex=False)
 		def feeder():
 			i = generator()
 			while 1:
 				try:
-					sender.send(next(i))
+					writer.send(next(i))
 				except StopIteration:
-					sender.send(StopIteration)
+					writer.send(StopIteration)
 					break
 		self.process = mp.Process(target=feeder)
 		self.process.start()
-		self.next = _iterrecv(receiver).next
+	
+	def __iter__(self):
+		return _iterrecv(self.reader)
 
 	def __repr__(self):
 		return '<ForkedFeeder at %s>' % hex(id(self))
@@ -741,15 +743,17 @@ class ForkedFilter(Filter):
 		328350
 		"""
 		super(ForkedFilter, self).__init__(function)
-		self.receiver, self.sender = mp.Pipe(duplex=False)
-		self.iterator = _iterrecv(self.receiver)
+		self.reader, self.writer = mp.Pipe(duplex=False)
+	
+	def __iter__(self):
+		return _iterrecv(self.reader)
 	
 	def __call__(self, inpipe):
 		def worker():
 			i = self.function(inpipe)
 			while 1:
 				try:
-					self.sender.send(next(i))
+					self.writer.send(next(i))
 				except StopIteration:
 					self.sender.send(StopIteration)
 					break

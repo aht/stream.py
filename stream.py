@@ -170,13 +170,13 @@ class Stream(collections.Iterator):
 		return itertools.chain(inpipe, self.iterator)
 
 	def __pipe__(self, inpipe):
-		self.iterator = self.__call__(inpipe)
+		self.iterator = self.__call__(iter(inpipe))
 		return self
 
 	@staticmethod
 	def pipe(inpipe, outpipe):
 		if hasattr(outpipe, '__pipe__'):
-			return outpipe.__pipe__(iter(inpipe))
+			return outpipe.__pipe__(inpipe)
 		elif hasattr(outpipe, '__call__'):
 			if hasattr(outpipe, '__name__') and outpipe.__name__ == 'list':
 				## For some reason `list` doesn't believe that inpipe is an iterator

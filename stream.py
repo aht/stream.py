@@ -755,7 +755,7 @@ class ForkedFilter(Filter):
 				try:
 					self.writer.send(next(i))
 				except StopIteration:
-					self.sender.send(StopIteration)
+					self.writer.send(StopIteration)
 					break
 		self.process = mp.Process(target=worker)
 		self.process.start()
@@ -764,6 +764,33 @@ class ForkedFilter(Filter):
 	def __repr__(self):
 		return '<ForkedFilter at %s>' % hex(id(self))
 
+#_____________________________________________________________________
+# Receiver
+
+import select
+
+class Receiver(Stream):
+	def __init__(self):
+		self.input_readers = []
+		
+		def select_read():
+			while self.input_readers:
+				### XXX: select doesn't work with pipes on Windows
+				ready, _, _ = select.select(self.input_readers, [], [])
+				for reader in ready:
+					item = reader.recv()
+					if item is StopIteration:
+						del self.input_readers[self.input_readers.index(reader)]
+					else:
+						yield item
+		
+		self.iterator = select_read()
+	
+	def __pipe__(self, inpipe):
+		self.input_readers.append(inpipe.reader)
+	
+	def __repr__(self):
+		return '<Receiver at %s>' % hex(id(self))
 
 #_____________________________________________________________________
 #

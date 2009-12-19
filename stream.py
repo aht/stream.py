@@ -683,7 +683,7 @@ class ForkedFeeder(collections.Iterable):
 		"""
 		self.reader, writer = mp.Pipe(duplex=False)
 		def feeder():
-			i = generator()
+			i = generator(*args, **kwargs)
 			while 1:
 				try:
 					writer.send(next(i))

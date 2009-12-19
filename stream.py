@@ -305,10 +305,7 @@ class itemtaker(Stream):
 					stop = self.slice.start
 				else:
 					stop = self.slice.stop
-				try:
-					items = [next(inpipe) for _ in xrange(stop)]
-				except StopIteration:
-					pass
+				items = list(itertools.islice(inpipe, stop))
 			return items[self.slice]
 
 	def __repr__(self):

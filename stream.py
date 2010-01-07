@@ -121,14 +121,22 @@ __author__ = 'Anh Hai Trinh'
 __email__ = 'moc.liamg@hnirt.iah.hna:otliam'[::-1]
 
 import __builtin__
+import copy
 import collections
+import heapq
 import itertools
+import multiprocessing
 import operator
+import threading
+import platform
+import Queue
 import re
-import string
+import select
+import time
 
 from operator import itemgetter, attrgetter, methodcaller
 
+zip = itertools.izip
 
 #_____________________________________________________________________
 #
@@ -238,7 +246,7 @@ class take(Stream):
 
 	def __call__(self, inpipe):
 		self.items =  list(itertools.islice(inpipe, self.n))
-		return self.items
+		return iter(self.items)
 
 	def __repr__(self):
 		return 'Stream(%s)' % repr(self.items)
@@ -590,35 +598,12 @@ class flattener(Stream):
 flatten = flattener()
 
 
-class zipwith(Stream):
-	"""
-	>>> range(10) >> zipwith(range(10, 20), range(20,30)) >> take(5)
-	Stream([(0, 10, 20), (1, 11, 21), (2, 12, 22), (3, 13, 23), (4, 14, 24)])
-	"""
-
-	def __init__(self, *iterables):
-		super(zipwith, self).__init__()
-		self.iterables = list(iterables)
-
-	def __call__(self, inpipe):
-		return itertools.izip(*([inpipe] + self.iterables))
-
-
 #_____________________________________________________________________
-#
 # Threaded/forked feeder
-#_____________________________________________________________________
 
 
-import threading
-import multiprocessing as mp
-from Queue import Queue
-
-
-### Helper generator functions
-
-def _iterqueue(queue):
-	"""Return a generator that yield items from a queue"""
+def iterqueue(queue):
+	"""Return a generator that yield items from a Queue."""
 	while 1:
 		item = queue.get()
 		if item is StopIteration:
@@ -627,29 +612,32 @@ def _iterqueue(queue):
 			yield item
 
 def _iterrecv(receiver):
-	"""Return a generator that receive items from whatever that hasattr('recv')"""
+	# Return a generator that receive items the receiving end
+	# of a multiprocessing.Connection object (system pipe).
 	while 1:
-		item = receiver.recv()
-		if item is StopIteration:
+		try:
+			item = receiver.recv()
+		except EOFError:
 			break
 		else:
-			yield item
+			if item is StopIteration:
+				break
+			else:
+				yield item
 
 
 class ThreadedFeeder(collections.Iterable):
 	def __init__(self, generator, *args, **kwargs):
 		"""Create a feeder that start the given generator with
-		*args and **kwargs in a separate thread and put
-		generated items into a Queue.
-
-		The feeder will act as an eagerly evaluating proxy of
-		the generator.
-
-		This should improve performance when the generator
-		often blocks in system calls.  Note that the GIL might
-		effect threading performance.
+		*args and **kwargs in a separate thread.  The feeder will
+		act as an eagerly evaluating proxy of the generator.
+		
+		The feeder can then be iter()'ed over by other threads.
+		
+		This should improve performance when the generator often
+		blocks in system calls.
 		"""
-		self.queue = Queue()
+		self.queue = Queue.Queue()
 		def feeder():
 			i = generator(*args, **kwargs)
 			while 1:
@@ -662,7 +650,7 @@ class ThreadedFeeder(collections.Iterable):
 		self.thread.start()
 	
 	def __iter__(self):
-		return _iterqueue(self.queue)
+		return iterqueue(self.queue)
 
 	def __repr__(self):
 		return '<ThreadedFeeder at %s>' % hex(id(self))
@@ -671,31 +659,31 @@ class ThreadedFeeder(collections.Iterable):
 class ForkedFeeder(collections.Iterable):
 	def __init__(self, generator, *args, **kwargs):
 		"""Create a feeder that start the given generator with
-		*args and **kwagrs in a child process which sends
-		results back to the parent.
+		*args and **kwagrs in a child process. The feeder will
+		act as an eagerly evaluating proxy of the generator.
 
-		The feeder will act as an eagerly evaluating proxy of
-		the generator.
+		The feeder can then be iter()'ed over by other processes.
 
-		This should improve performance when the generator
-		often blocks in system calls.  Note that serialization
-		could be costly.
+		This should improve performance when the generator often
+		blocks in system calls.  Note that serialization could
+		be costly.
 		"""
-		self.reader, writer = mp.Pipe(duplex=False)
-		def feeder():
-			i = generator(*args, **kwargs)
+		self.outpipe, inpipe = multiprocessing.Pipe(duplex=False)
+		def feeder(generator, outpipe, *a, **kw):
+			i = generator(*a, **kw)
 			while 1:
 				try:
-					writer.send(next(i))
+					outpipe.send(next(i))
 				except StopIteration:
-					writer.send(StopIteration)
+					outpipe.send(StopIteration)
 					break
-		self.process = mp.Process(target=feeder)
+		args = [generator, inpipe] + list(args)
+		self.process = multiprocessing.Process(target=feeder, args=args, kwargs=kwargs)
 		self.process.start()
 	
 	def __iter__(self):
-		return _iterrecv(self.reader)
-
+		return _iterrecv(self.outpipe)
+	
 	def __repr__(self):
 		return '<ForkedFeeder at %s>' % hex(id(self))
 
@@ -762,32 +750,132 @@ class ForkedFilter(Filter):
 		return '<ForkedFilter at %s>' % hex(id(self))
 
 #_____________________________________________________________________
-# Receiver
+# Collector
 
-import select
 
-class Receiver(Stream):
+class PCollector(Stream):
+	"""Collect items from the receiving ends of many system pipes
+	whenever they are ready.
+	"""
 	def __init__(self):
-		self.input_readers = []
+		self.input_pipes = []
 		
-		def select_read():
-			while self.input_readers:
-				### XXX: select doesn't work with pipes on Windows
-				ready, _, _ = select.select(self.input_readers, [], [])
-				for reader in ready:
-					item = reader.recv()
+		def receive():
+			while self.input_pipes:
+				ready, _, _ = select.select(self.input_pipes, [], [])
+				for inpipe in ready:
+					item = inpipe.recv()
 					if item is StopIteration:
-						del self.input_readers[self.input_readers.index(reader)]
+						del self.input_pipes[self.input_pipes.index(inpipe)]
 					else:
 						yield item
 		
-		self.iterator = select_read()
+		self.iterator = receive()
 	
 	def __pipe__(self, inpipe):
-		self.input_readers.append(inpipe.reader)
+		self.input_pipes.append(inpipe.outpipe)
+	
+	def __repr__(self):
+		return '<Collector at %s>' % hex(id(self))
+
+class _PCollector(Stream):
+	"""Collect items from the receiving ends of many system pipes
+	whenever they are ready.  This version does not use the select(2)
+	system call and will work on Windows.
+	"""
+	def __init__(self, waittime=0.1):
+		"""waitime: the duration that the collector will go to
+		sleep when none of the pipes are ready to read.
+		"""
+		self.input_pipes = []
+		self.waittime = waittime
+		
+		def receive():
+			while self.input_pipes:
+				ready = [r for r in self.input_pipes if r.poll()]
+				if not ready:
+					time.sleep(self.waittime)
+				for inpipe in ready:
+					item = inpipe.recv()
+					if item is StopIteration:
+						del self.input_pipes[self.input_pipes.index(inpipe)]
+					else:
+						yield item
+		
+		self.iterator = receive()
+	
+	def __pipe__(self, inpipe):
+		self.input_pipes.append(inpipe.pipe)
+	
+	def __repr__(self):
+		return '<WCollector at %s>' % hex(id(self))
+
+
+class QCollector(Stream):
+	"""Collect items from the many queues whenever they are ready."""
+	def __init__(self, waittime=0.1):
+		"""waitime: the duration that the collector will go to
+		sleep when all queues are empty.
+		"""
+		self.input_queues = []
+		self.waittime = waittime
+		
+		def get():
+			while self.input_queues:
+				ready = [q for q in self.input_queues if not q.empty()]
+				if not ready:
+					time.sleep(self.waittime)
+				for q in ready:
+					item = q.get()
+					if item is StopIteration:
+						del self.input_queues[self.input_queues.index(q)]
+					else:
+						yield item
+		
+		self.iterator = get()
+	
+	def __pipe__(self, inpipe):
+		self.input_queues.append(inpipe.queue)
+	
+	def __repr__(self):
+		return '<QCollector at %s>' % hex(id(self))
+
+if platform.system() == 'Windows':
+	PCollector = _PCollector
+
+
+class Sorter(Stream):
+	def __init__(self):
+		self.input_pipes = []
+		self.queue = []
+
+	def start(self):
+		self.queue = [Queue.Queue() for _ in xrange(len(self.input_pipes))]
+		def collect():
+			# We make a shallow copy of selfinput_pipes,
+			# as we will be mutating it, but need to be able to refer
+			# to the correct queue index
+			qindex = copy.copy(self.input_pipes).index
+			while self.input_pipes:
+				ready, _, _ = select.select(self.input_pipes, [], [])
+				for inpipe in ready:
+					item = inpipe.recv()
+					self.queue[qindex(inpipe)].put(item)
+					if item is StopIteration:
+						del self.input_pipes[self.input_pipes.index(inpipe)]
+		self.collector_thread = threading.Thread(target=collect)
+		self.collector_thread.start()
+		
+		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(iterqueue, self.queue))
+		self.sorter_thread = sorter.thread
+		self.iterator = iter(sorter)
+	
+	def __pipe__(self, inpipe):
+		self.input_pipes.append(inpipe.outpipe)
 	
 	def __repr__(self):
 		return '<Receiver at %s>' % hex(id(self))
+
 
 #_____________________________________________________________________
 #

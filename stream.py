@@ -127,11 +127,11 @@ import heapq
 import itertools
 import multiprocessing
 import operator
-import threading
 import platform
 import Queue
 import re
 import select
+import threading
 import time
 
 from operator import itemgetter, attrgetter, methodcaller
@@ -603,27 +603,19 @@ flatten = flattener()
 
 
 def iterqueue(queue):
-	"""Return a generator that yield items from a Queue."""
+	"""Return a generator that yield items from a Queue. The generator will
+	exhaust when the object StopIteration is received.
+	"""
 	while 1:
 		item = queue.get()
 		if item is StopIteration:
+			# Re-broadcast, in case there is another thread blocking on
+			# queue.get().  That thread will receive StopIteration and
+			# re-broadcast to the next one in line.
+			queue.put(StopIteration)
 			break
 		else:
 			yield item
-
-def _iterrecv(receiver):
-	# Return a generator that receive items the receiving end
-	# of a multiprocessing.Connection object (system pipe).
-	while 1:
-		try:
-			item = receiver.recv()
-		except EOFError:
-			break
-		else:
-			if item is StopIteration:
-				break
-			else:
-				yield item
 
 
 class ThreadedFeeder(collections.Iterable):
@@ -637,20 +629,20 @@ class ThreadedFeeder(collections.Iterable):
 		This should improve performance when the generator often
 		blocks in system calls.
 		"""
-		self.queue = Queue.Queue()
+		self.output_queue = Queue.Queue()
 		def feeder():
 			i = generator(*args, **kwargs)
 			while 1:
 				try:
-					self.queue.put(next(i))
+					self.output_queue.put(next(i))
 				except StopIteration:
-					self.queue.put(StopIteration)
+					self.output_queue.put(StopIteration)
 					break
 		self.thread = threading.Thread(target=feeder)
 		self.thread.start()
 	
 	def __iter__(self):
-		return iterqueue(self.queue)
+		return iterqueue(self.output_queue)
 
 	def __repr__(self):
 		return '<ThreadedFeeder at %s>' % hex(id(self))
@@ -682,75 +674,109 @@ class ForkedFeeder(collections.Iterable):
 		self.process.start()
 	
 	def __iter__(self):
-		return _iterrecv(self.outpipe)
+		def iterrecv(pipe):
+			while 1:
+				try:
+					item = pipe.recv()
+				except EOFError:
+					break
+				else:
+					if item is StopIteration:
+						break
+					else:
+						yield item
+		return iterrecv(self.outpipe)
 	
 	def __repr__(self):
 		return '<ForkedFeeder at %s>' % hex(id(self))
 
 
 #_____________________________________________________________________
-#
-# Threaded/forked Filter
-#_____________________________________________________________________
+# Asynchronous filters using a pool of threads or processes
 
 
-class ThreadedFilter(Filter):
-	def __init__(self, function):
-		"""
-		>>> xrange(100) >> ThreadedFilter(lambda s: s >> map(lambda x: x*x)) >> reduce(operator.add)
-		328350
-		"""
-		super(ThreadedFilter, self).__init__(function)
-		self.queue = Queue()
-		self.iterator = _iterqueue(self.queue)
-	
-	def __call__(self, inpipe):
+class AsyncThreadPool(Filter):
+	def __init__(self, function, poolsize=multiprocessing.cpu_count()):
+		"""function must be one that takes an iterator and returns an iterator"""
+		super(AsyncThreadPool, self).__init__(function)
+		self.poolsize = poolsize
+		self.input_queue = Queue.Queue()
+		self.output_queue = Queue.Queue()
+		self.worker_threads = []
 		def worker():
-			i = self.function(inpipe)
+			input = iterqueue(self.input_queue)
+			output = self.function(input)
 			while 1:
 				try:
-					self.queue.put(next(i))
+					self.output_queue.put(next(output))
 				except StopIteration:
-					self.queue.put(StopIteration)
 					break
-		self.thread = threading.Thread(target=worker)
-		self.thread.start()
-		return self.iterator
-
-	def __repr__(self):
-		return '<ThreadedFilter at %s>' % hex(id(self))
-
-
-class ForkedFilter(Filter):
-	def __init__(self, function):
-		"""
-		>>> xrange(100) >> ForkedFilter(lambda s: s >> map(lambda x: x*x)) >> reduce(operator.add)
-		328350
-		"""
-		super(ForkedFilter, self).__init__(function)
-		self.reader, self.writer = mp.Pipe(duplex=False)
+		for _ in range(poolsize):
+			t = threading.Thread(target=worker)
+			self.worker_threads.append(t)
+			t.start()
 	
 	def __iter__(self):
-		return _iterrecv(self.reader)
+		return iterqueue(self.output_queue)
 	
 	def __call__(self, inpipe):
-		def worker():
-			i = self.function(inpipe)
+		def feeder():
+			for item in inpipe:
+				self.input_queue.put(item)
+			self.input_queue.put(StopIteration)
+			## Wait for all workers to finish
+			for t in self.worker_threads:
+				t.join()
+			self.output_queue.put(StopIteration)
+		self.feeder_thread = threading.Thread(target=feeder)
+		self.feeder_thread.start()
+	
+	def __repr__(self):
+		return '<AsyncThreadPool at %s>' % hex(id(self))
+
+
+class AsyncProcessPool(Filter):
+	def __init__(self, function, poolsize=multiprocessing.cpu_count()):
+		"""function must be one that takes an iterator and returns an iterator"""
+		super(AsyncProcessPool, self).__init__(function)
+		self.poolsize = poolsize
+		self.input_queue = multiprocessing.Queue()
+		self.output_queue = multiprocessing.Queue()
+		self.worker_processes = []
+		def worker(inqueue, outqueue):
+			input = iterqueue(inqueue)
+			output = self.function(input)
 			while 1:
 				try:
-					self.writer.send(next(i))
+					outqueue.put(next(output))
 				except StopIteration:
-					self.writer.send(StopIteration)
 					break
-		self.process = mp.Process(target=worker)
-		self.process.start()
-		return self.iterator
-
+		for _ in range(self.poolsize):
+			p = multiprocessing.Process(target=worker, args=(self.input_queue, self.output_queue))
+			self.worker_processes.append(p)
+			p.start()
+	
+	def __iter__(self):
+		return iterqueue(self.output_queue)
+	
+	def __call__(self, inpipe):
+		def feeder():
+			for item in inpipe:
+				self.input_queue.put(item)
+			self.input_queue.put(StopIteration)
+			## Wait for all workers to finish
+			for p in self.worker_processes:
+				p.join()
+			self.output_queue.put(StopIteration)
+		self.feeder_thread = threading.Thread(target=feeder)
+		self.feeder_thread.start()
+	
 	def __repr__(self):
-		return '<ForkedFilter at %s>' % hex(id(self))
+		return '<AsyncProcessPool at %s>' % hex(id(self))
+
 
 #_____________________________________________________________________
-# Collector
+# Collectors
 
 
 class PCollector(Stream):
@@ -778,10 +804,10 @@ class PCollector(Stream):
 	def __repr__(self):
 		return '<Collector at %s>' % hex(id(self))
 
+## This version does not use the select(2) system call, thus works on Windows.
 class _PCollector(Stream):
 	"""Collect items from the receiving ends of many system pipes
-	whenever they are ready.  This version does not use the select(2)
-	system call and will work on Windows.
+	whenever they are ready.
 	"""
 	def __init__(self, waittime=0.1):
 		"""waitime: the duration that the collector will go to
@@ -805,14 +831,14 @@ class _PCollector(Stream):
 		self.iterator = receive()
 	
 	def __pipe__(self, inpipe):
-		self.input_pipes.append(inpipe.pipe)
+		self.input_pipes.append(inpipe.outpipe)
 	
 	def __repr__(self):
 		return '<WCollector at %s>' % hex(id(self))
 
 
 class QCollector(Stream):
-	"""Collect items from the many queues whenever they are ready."""
+	"""Collect items from many queues whenever they are ready."""
 	def __init__(self, waittime=0.1):
 		"""waitime: the duration that the collector will go to
 		sleep when all queues are empty.
@@ -835,7 +861,7 @@ class QCollector(Stream):
 		self.iterator = get()
 	
 	def __pipe__(self, inpipe):
-		self.input_queues.append(inpipe.queue)
+		self.input_queues.append(inpipe.output_queue)
 	
 	def __repr__(self):
 		return '<QCollector at %s>' % hex(id(self))
@@ -845,16 +871,16 @@ if platform.system() == 'Windows':
 
 
 class Sorter(Stream):
+	"""Merge sorted input coming from system pipes."""
 	def __init__(self):
 		self.input_pipes = []
 		self.queue = []
 
-	def start(self):
+	def run(self):
 		self.queue = [Queue.Queue() for _ in xrange(len(self.input_pipes))]
 		def collect():
-			# We make a shallow copy of selfinput_pipes,
-			# as we will be mutating it, but need to be able to refer
-			# to the correct queue index
+			# We make a shallow copy of self.input_pipes, as we will be
+			# mutating it, but need to refer to the correct queue index
 			qindex = copy.copy(self.input_pipes).index
 			while self.input_pipes:
 				ready, _, _ = select.select(self.input_pipes, [], [])
@@ -874,7 +900,7 @@ class Sorter(Stream):
 		self.input_pipes.append(inpipe.outpipe)
 	
 	def __repr__(self):
-		return '<Receiver at %s>' % hex(id(self))
+		return '<Sorter at %s>' % hex(id(self))
 
 
 #_____________________________________________________________________

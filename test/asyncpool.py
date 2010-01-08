@@ -8,10 +8,10 @@ from random import randint
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from stream import filter, AsyncThreadPool, AsyncProcessPool
+from stream import filter, map, AsyncThreadPool, AsyncProcessPool
 
 
-func = lambda s: s >> filter(lambda x: x&1)
+## Generate some data for testing
 
 dataset = []
 
@@ -22,39 +22,45 @@ def alternating(n):
 		values.append(-i)
 	return values
 
-for v in map(alternating, [10, 100, 1000]):
-	dataset.append(v)
-
 def randomized(n):
 	values = []
 	for _ in range(n):
 		values.append(randint(-sys.maxint, sys.maxint))
 	return values
 
-for v in map(randomized, [10, 100, 1000]):
+for v in [10, 100, 1000] >> map(alternating):
 	dataset.append(v)
 
-def threadpool(dataset):
-	a = dataset >> AsyncThreadPool(func, poolsize=2) >> set
-	b = func(dataset) >> set
-	pprint(a)
-	pprint(b)
-	assert a == b
+for v in [10, 100, 1000] >> map(randomized):
+	dataset.append(v)
 
-def procpool(dataset):
-	a = dataset >> AsyncProcessPool(func, poolsize=2) >> set
-	b = func(dataset) >> set
-	pprint(a)
-	pprint(b)
-	assert a == b
+## The test cases
+
+func = filter(lambda x: x&1)
+
+resultset = dataset >> map(lambda s: s >> func >> set) >> list
+
+def threadpool(i):
+	result = dataset[i] >> AsyncThreadPool(func, poolsize=2) >> set
+	pprint(result)
+	assert result == resultset[i]
+
+def procpool(i):
+	result = dataset[i] >> AsyncProcessPool(func, poolsize=2) >> set
+	pprint(result)
+	assert result == resultset[i]
+
+
+## Test againts the generated data
 
 def test_threadpool():
-	for v in dataset:
-		yield threadpool, v
+	for i in range(len(dataset)):
+		yield threadpool, i
 
 def test_procpool():
-	for v in dataset:
-		yield procpool, v
+	for i in range(len(dataset)):
+		yield procpool, i
+
 
 if __name__ == '__main__':
 	import nose

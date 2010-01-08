@@ -1,7 +1,7 @@
 """Lazily-evaluated stream with pipelining via the '>>' operator.
 
-Introduction
-============
+Overview
+========
 
 Streams are generalized iterators with a pipelining mechanism to enable
 data-flow programming.
@@ -35,13 +35,28 @@ Values are computed only when an accumulator forces some or all evaluation
 
 
 Parallelization
-===============
+---------------
 
 When a producer is doing blocking I/O, it is possible to use a ThreadedFeeder
 or ForkedFeeder to improve performance.  The feeder will start a thread or a
 process to run the producer and feed generated items back to the pipeline, thus
 minimizing the time that the whole pipeline has to wait when the producer is
 blocking in system calls.
+
+If the order of processing does not matter, an AsyncThreadPool or
+AsyncProcessPool can be used.  They both utilize a number of workers in other
+theads or processes to work on items pulled from the piped input.  It is
+also possible to submit jobs to a thread/process pool concurrently.
+
+Multiple streams can be piped to a single PCollector or QCollector, which will
+gather generated items whenever they are avaiable.  PCollectors can collect
+from ForkedFeeders or AsyncProcessPool (via system pipes) and QCollectors can
+collect from ThreadedFeeders and AsyncThreadPool (via queues).  PSorter and
+QSorter are also collectors, but given multiples sorted input streams (low to
+high), a P|QSorter will output items in sorted order.
+
+Using multiples Feeders and Collectors, one can implement many parallel
+processing patterns:  fan-in, fan-out, many-to-many map-reduce, etc.
 
 
 Articles
@@ -54,8 +69,8 @@ Articles written about this module by the author can be retrieved from
 Examples
 ========
 
-Better itertools.islice
------------------------
+Slicing iterators
+-----------------
 ::
 
   >>> from itertools import count
@@ -83,43 +98,6 @@ Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ..::
 
     >>> gseq(0.5) >> fold(operator.add) >> item[:5]
     [1, 1.5, 1.75, 1.875, 1.9375]
-
-Random Walk in 2D
------------------
-Generate an infinite stream of coordinates representing the position of
-a random walker in 2D::
-
-    from random import choice
-    vectoradd = lambda u,v: zip(u, v) >> apply(operator.add) >> list
-    directions = [[1,0], [0,1], [-1,0], [0,-1]]
-    rw = lambda: repeatcall(choice, directions) >> fold(vectoradd, [0, 0])
-
-Calling choice repeatedly yields the series of unit vectors representing the
-directions that the walker takes, then these vectors are gradually added to get
-a series of coordinates.
-
-To instantiate a random-walk, and get the first 10 coordinates::
-
-    walk = rw()
-    walk >> item[:10]
-
-Question: what is the farthest point that the walker wanders upto the first
-return to the origin? (Note that he might never return at all!)::
-
-    vectorlen = lambda v: v >> map(lambda x: x**2) >> sum
-    rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> maximum(key=vectorlen)
-
-The first coordinate [0, 0], which is the origin, needs to be dropped otherwise
-takewhile will truncate immediately.
-
-We can also probe into the walker's chosen path::
-
-    probe = Stream()
-    rw() >> drop(1) >> takewhile(lambda v: v != [0, 0]) >> tee(probe) >> maximum(key=vectorlen)
-
-Now you can see his exact coordinates, for example the first 10 are::
-
-    probe >> item[:10]
 """
 
 __version__ = '0.8'
@@ -385,7 +363,7 @@ class dropi(Stream):
 			old_idx = -1
 			idx, exhausted = try_next_idx()                  # next value to discard
 			while 1:
-				c =next(counter)
+				c = next(counter)
 				elem = next(inpipe)
 				while not exhausted and idx <= old_idx:    # ignore bad values
 					idx, exhausted = try_next_idx()	
@@ -406,7 +384,7 @@ class Filter(Stream):
 	a Stream filter.
 	"""
 	def __init__(self, function):
-		"""function: an iterator-processing function, i.e. one that takes an
+		"""function: an iterator-processing function, one that takes an
 		iterator and return an iterator
 		"""
 		super(Filter, self).__init__()
@@ -447,8 +425,8 @@ class map(Stream):
 
 
 class filter(Filter):
-	"""Invoke a function using each element of the input stream as its only
-	argument, a la itertools.ifilter.
+	"""Filter the input stream, selecting only values which evaluates to True
+	by the given function, a la itertools.ifilter.
 
 	>>> even = lambda x: x%2 == 0
 	>>> range(10) >> filter(even) >> list
@@ -459,11 +437,17 @@ class filter(Filter):
 
 
 class takewhile(Filter):
+	"""Take items from the input stream that come before the first item to
+	evaluate to False by the given function, a la itertools.takewhile.
+	"""
 	def __call__(self, inpipe):
 		return itertools.takewhile(self.function, inpipe)
 
 
 class dropwhile(Filter):
+	"""Drop items from the input stream that come before the first item to
+	evaluate to False by the given function, a la itertools.dropwhile.
+	"""
 	def __call__(self, inpipe):
 		return itertools.dropwhile(self.function, inpipe)
 
@@ -619,8 +603,8 @@ class tee(Stream):
 
 
 def iterqueue(queue):
-	"""Return a generator that yield items from a Queue. The generator will
-	exhaust when the object StopIteration is received.
+	"""Turn a Queue into an thread-safe iterator which will
+	exhaust when StopIteration is put into the Queue.
 	"""
 	while 1:
 		item = queue.get()
@@ -717,9 +701,18 @@ class AsyncThreadPool(Stream):
 	>>> results = range(10) >> AsyncThreadPool(map(square), 2) >> set
 	>>> results == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
 	True
+	
+	If an input value causes an Exception to be raised, the tuple
+	(value, exception) is put into the pool's `failqueue`. The attribute
+	`failure` is a thead-safe iterator over the failqueue.  (The pool object
+	is still an iterable over the output values as before)
+
+	An alternate way to use AsyncThreadPool is to instantiate it, then submit
+	jobs to its `inqueue` concurrently, using StopIteration to mark the end.
+	This would be necessary if failed jobs need to be resubmitted.
 	"""
 	def __init__(self, function, poolsize=multiprocessing.cpu_count(), args=[], kwargs={}):
-		"""function: an iterator-processing function, i.e. one that takes an
+		"""function: an iterator-processing function, one that takes an
 		iterator and return an iterator
 		"""
 		super(AsyncThreadPool, self).__init__()
@@ -781,9 +774,18 @@ class AsyncProcessPool(Stream):
 	>>> results = range(10) >> AsyncProcessPool(map(square), 2) >> set
 	>>> results == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
 	True
+	
+	If an input value causes an Exception to be raised, the tuple
+	(value, exception) is put into the pool's `failqueue`. The attribute
+	`failure` is a thead-safe iterator over the failqueue.  (The pool object
+	is still an iterable over the output values as before)
+
+	An alternate way to use AsyncProcessPool is to instantiate it, then submit
+	jobs to its `inqueue` concurrently, using StopIteration to mark the end.
+	This would be necessary if failed jobs need to be resubmitted.
 	"""
 	def __init__(self, function, poolsize=multiprocessing.cpu_count(), args=[], kwargs={}):
-		"""function: an iterator-processing function, i.e. one that takes an
+		"""function: an iterator-processing function, one that takes an
 		iterator and return an iterator
 		"""
 		super(AsyncProcessPool, self).__init__(function)

@@ -27,7 +27,7 @@ setup(
 	name = 'stream',
 	version = stream.__version__,
 	description = stream.__doc__.split('\n')[0],
-	long_description = ''.join(open('stream.py').readlines()[2:117]),
+	long_description = ''.join(open('stream.py').readlines()[2:100]),
 	author = 'Anh Hai Trinh',
 	author_email = 'moc.liamg@hnirt.iah.hna:otliam'[::-1],
 	keywords='lazy iterator generator stream pipe parallel data flow functional list processing',

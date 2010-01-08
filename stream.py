@@ -197,11 +197,7 @@ class Stream(collections.Iterable):
 		if hasattr(outpipe, '__pipe__'):
 			return outpipe.__pipe__(inpipe)
 		elif hasattr(outpipe, '__call__'):
-			if hasattr(outpipe, '__name__') and outpipe.__name__ == 'list':
-				## For some reason `list` doesn't believe that inpipe is an iterator
-				return outpipe(iter(inpipe))
-			else:
-				return outpipe(inpipe)
+			return outpipe(inpipe)
 		else:
 			raise BrokenPipe('No connection mechanism defined')
 
@@ -218,13 +214,6 @@ class Stream(collections.Iterable):
 		"""
 		inpipe.iterator = self.__call__(inpipe.iterator)
 		return inpipe
-
-	def __len__(self):				### this will force all evaluation
-		"""
-		>>> Stream(range(20)) >> len
-		20
-		"""
-		return len([i for i in self.iterator])
 
 	def __repr__(self):
 		return 'Stream(%s)' % repr(self.iterator)

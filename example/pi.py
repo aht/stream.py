@@ -1,9 +1,10 @@
 #!/usr/bin/env python2.6
+# -*- coding: utf-8 -*-
 
 import operator
 
-from decimal import Decimal
-from stream import Stream, Filter, seq, gseq, apply, map, fold, zipwith, item
+from decimal import Decimal, getcontext
+from stream import Stream, Filter, seq, gseq, apply, map, fold, zip, item
 
 """
 Compute digits of pi using the Gregory series, and its accelerated variants.
@@ -12,7 +13,7 @@ For a detailed explanation, see this section of SICP:
 <http://mitpress.mit.edu/sicp/full-text/sicp/book/node72.html>
 """
 
-alt_sign = lambda s: s >> zipwith(gseq(1, -1)) >> apply(operator.mul)
+alt_sign = lambda s: zip(s, gseq(-1, initval=1)) >> apply(operator.mul)
 
 ## Return the partial sums of the Gregory series converging to atan(1) == pi/4
 ## @param t: the type of number we want to work with: either float or Decimal
@@ -20,6 +21,7 @@ def Gregory(t=float):
 	return seq(t(1), step=2) >> map(lambda x: 1/x) >> alt_sign >> fold(operator.add)
 
 series1 = Gregory()
+
 
 ## Accelerate the convergence by transforming the series
 ## using Aitken's delta-squared process (SCIP calls it Euler)
@@ -33,6 +35,7 @@ def Aitken(inpipe):
 	return genfunc()
 
 series2 = Gregory() >> Aitken
+
 
 ## Recursively apply a transformation
 class recur_transform(Stream):
@@ -49,3 +52,8 @@ class recur_transform(Stream):
 		return genfunc()
 
 series3 = Gregory(Decimal) >> recur_transform(Aitken)
+
+
+if __name__ == '__main__':
+	getcontext().prec = 33
+	print 'π =', 4 * (series3 >> item[13])

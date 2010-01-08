@@ -1,3 +1,5 @@
+#!/usr/bin/env python2.6
+
 import time
 import operator
 from stream import ThreadedFeeder, ForkedFeeder, map, reduce

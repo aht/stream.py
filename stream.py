@@ -708,7 +708,7 @@ class ForkedFeeder(collections.Iterable):
 
 #_____________________________________________________________________
 # Asynchronous stream filters using a pool of threads or processes
-
+			
 
 class AsyncThreadPool(Stream):
 	"""Work on the input stream asynchronously using a pool of threads.
@@ -727,24 +727,33 @@ class AsyncThreadPool(Stream):
 		self.poolsize = poolsize
 		self.inqueue = Queue.Queue()
 		self.outqueue = Queue.Queue()
+		self.failqueue = Queue.Queue()
+		self.failure = iterqueue(self.failqueue)
+		self.finished = False
 		def work():
-			input = iterqueue(self.inqueue)
+			# We want to report bad input in case of failure
+			input, dupinput = itertools.tee(iterqueue(self.inqueue))
 			output = self.function(input, *args, **kwargs)
 			while 1:
 				try:
 					self.outqueue.put(next(output))
+					next(dupinput)
 				except StopIteration:
 					break
+				except Exception as e:
+					self.failqueue.put((next(dupinput), e))
 		self.worker_threads = []
 		for _ in range(poolsize):
 			t = threading.Thread(target=work)
 			self.worker_threads.append(t)
 			t.start()
 		def cleanup():
-			# Wait for all workers to finish, then signal the end of output.
+			# Wait for all workers to finish, then signal the end of outqueue and failqueue.
 			for t in self.worker_threads:
 				t.join()
 			self.outqueue.put(StopIteration)
+			self.failqueue.put(StopIteration)
+			self.finished = True
 		self.cleaner_thread = threading.Thread(target=cleanup)
 		self.cleaner_thread.start()
 	
@@ -752,6 +761,8 @@ class AsyncThreadPool(Stream):
 		return iterqueue(self.outqueue)
 	
 	def __call__(self, inpipe):
+		if self.finished:
+			raise BrokenPipe('All workers are dead, refusing to summit jobs. Use another Pool.')
 		def feeder():
 			for item in inpipe:
 				self.inqueue.put(item)
@@ -780,24 +791,33 @@ class AsyncProcessPool(Stream):
 		self.poolsize = poolsize
 		self.inqueue = multiprocessing.Queue()
 		self.outqueue = multiprocessing.Queue()
+		self.failqueue = multiprocessing.Queue()
+		self.failure = iterqueue(self.failqueue)
+		self.finished = False
 		def work():
-			input = iterqueue(self.inqueue)
+			# We want to report bad input in case of failure
+			input, dupinput = itertools.tee(iterqueue(self.inqueue))
 			output = self.function(input, *args, **kwargs)
 			while 1:
 				try:
 					self.outqueue.put(next(output))
+					next(dupinput)
 				except StopIteration:
 					break
+				except Exception as e:
+					self.failqueue.put((next(dupinput), e))
 		self.worker_processes = []
 		for _ in range(self.poolsize):
 			p = multiprocessing.Process(target=work)
 			self.worker_processes.append(p)
 			p.start()
 		def cleanup():
-			# Wait for all workers to finish, then signal the end of output.
+			# Wait for all workers to finish, then signal the end of outqueue and failqueue.
 			for p in self.worker_processes:
 				p.join()
 			self.outqueue.put(StopIteration)
+			self.failqueue.put(StopIteration)
+			self.finished = True
 		self.cleaner_thread = threading.Thread(target=cleanup)
 		self.cleaner_thread.start()
 
@@ -806,6 +826,8 @@ class AsyncProcessPool(Stream):
 		return iterqueue(self.outqueue)
 	
 	def __call__(self, inpipe):
+		if self.finished:
+			raise BrokenPipe('All workers are dead, refusing to summit jobs. Use another Pool.')
 		def feeder():
 			for item in inpipe:
 				self.inqueue.put(item)

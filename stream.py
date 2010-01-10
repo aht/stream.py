@@ -109,11 +109,12 @@ import collections
 import heapq
 import itertools
 import multiprocessing
+import multiprocessing.queues
 import operator
-import platform
 import Queue
 import re
 import select
+import sys
 import threading
 import time
 
@@ -602,9 +603,10 @@ class tee(Stream):
 # Threaded/forked feeder
 
 
-def iterqueue(queue):
-	"""Turn a Queue into an thread-safe iterator which will
-	exhaust when StopIteration is put into the Queue.
+def _iterqueue(queue):
+	"""Turn a either a threading.Queue or a multiprocessing.queues.SimpleQueue
+	into an thread-safe iterator which will exhaust when StopIteration is put
+	into it.
 	"""
 	while 1:
 		item = queue.get()
@@ -642,7 +644,7 @@ class ThreadedFeeder(collections.Iterable):
 		self.thread.start()
 	
 	def __iter__(self):
-		return iterqueue(self.output_queue)
+		return _iterqueue(self.output_queue)
 
 	def __repr__(self):
 		return '<ThreadedFeeder at %s>' % hex(id(self))
@@ -719,13 +721,13 @@ class ThreadPool(Stream):
 		"""
 		super(ThreadPool, self).__init__()
 		self.function = function
-		self.inqueue = Queue.Queue(poolsize)
+		self.inqueue = Queue.Queue()
 		self.outqueue = Queue.Queue()
 		self.failqueue = Queue.Queue()
-		self.failure = Stream(iterqueue(self.failqueue))
+		self.failure = Stream(_iterqueue(self.failqueue))
 		self.finished = False
 		def work():
-			input, dupinput = itertools.tee(iterqueue(self.inqueue))
+			input, dupinput = itertools.tee(_iterqueue(self.inqueue))
 			output = self.function(input, *args, **kwargs)
 			while 1:
 				try:
@@ -751,11 +753,12 @@ class ThreadPool(Stream):
 		self.cleaner_thread.start()
 	
 	def __iter__(self):
-		return iterqueue(self.outqueue)
+		return _iterqueue(self.outqueue)
 	
 	def __call__(self, inpipe):
 		if self.finished:
-			raise BrokenPipe('All workers are dead, refusing to summit jobs. Use another Pool.')
+			raise BrokenPipe('All workers are dead, refusing to summit jobs. '
+					'Use another Pool.')
 		def feed():
 			for item in inpipe:
 				self.inqueue.put(item)
@@ -792,13 +795,13 @@ class ProcessPool(Stream):
 		super(ProcessPool, self).__init__()
 		self.function = function
 		self.poolsize = poolsize
-		self.inqueue = multiprocessing.Queue(poolsize)
-		self.outqueue = multiprocessing.Queue()
-		self.failqueue = multiprocessing.Queue()
-		self.failure = Stream(iterqueue(self.failqueue))
+		self.inqueue = multiprocessing.queues.SimpleQueue()
+		self.outqueue = multiprocessing.queues.SimpleQueue()
+		self.failqueue = multiprocessing.queues.SimpleQueue()
+		self.failure = Stream(_iterqueue(self.failqueue))
 		self.finished = False
 		def work():
-			input, dupinput = itertools.tee(iterqueue(self.inqueue))
+			input, dupinput = itertools.tee(_iterqueue(self.inqueue))
 			output = self.function(input, *args, **kwargs)
 			while 1:
 				try:
@@ -824,11 +827,12 @@ class ProcessPool(Stream):
 		self.cleaner_thread.start()
 	
 	def __iter__(self):
-		return iterqueue(self.outqueue)
+		return _iterqueue(self.outqueue)
 	
 	def __call__(self, inpipe):
 		if self.finished:
-			raise BrokenPipe('All workers are dead, refusing to summit jobs. Use another Pool.')
+			raise BrokenPipe('All workers are dead, refusing to summit jobs. '
+					'Use another Pool.')
 		def feed():
 			for item in inpipe:
 				self.inqueue.put(item)
@@ -842,9 +846,9 @@ class ProcessPool(Stream):
 
 class Executor(object):
 	"""
-	Provide an API to submit and cancel jobs concurrently using a ThreadPool or ProcessPool.
+	Provide fine-grained control over a ThreadPool or ProcessPool.
 	
-	>>> executor = Executor(ThreadPool, map(lambda x: x*x))
+	>>> executor = Executor(ProcessPool, map(lambda x: x*x))
 	>>> executor.submit(*range(10))
 	[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 	>>> executor.submit('foo')
@@ -856,44 +860,54 @@ class Executor(object):
 	[('foo', TypeError("can't multiply sequence by non-int of type 'str'",))]
 	"""
 	def __init__(self, poolclass, function, poolsize=_nCPU, args=[], kwargs={}):
-		def process_with_id(input):
+		def process_job_id(input):
 			input, dupinput = itertools.tee(input)
 			id = iter(dupinput >> cut[0])
 			input = iter(input >> cut[1])
 			output = function(input)
 			for item in output:
 				yield next(id), item
-		self.pool = poolclass(process_with_id, poolsize=poolsize, args=args, kwargs=kwargs)
+		self.pool = poolclass(process_job_id,
+				          poolsize=poolsize,
+					    args=args,
+					    kwargs=kwargs)
 		self.job_count = 0
 		self.status = []
 		if poolclass is ProcessPool:
-			self.waitqueue = multiprocessing.Queue()
-			self.resultqueue = multiprocessing.Queue()
-			self.failqueue = multiprocessing.Queue()
+			self.waitqueue = multiprocessing.queues.SimpleQueue()
+			self.resultqueue = multiprocessing.queues.SimpleQueue()
+			self.failqueue = multiprocessing.queues.SimpleQueue()
 			self.lock = multiprocessing.Lock()
+			self.sema = multiprocessing.BoundedSemaphore(poolsize)
 		else:
 			self.waitqueue = Queue.Queue()
 			self.resultqueue = Queue.Queue()
 			self.failqueue = Queue.Queue()
 			self.lock = threading.Lock()
-		self.result = Stream(iterqueue(self.resultqueue))
-		self.failure = Stream(iterqueue(self.failqueue))
+			self.sema = threading.BoundedSemaphore(poolsize)
+		self.result = Stream(_iterqueue(self.resultqueue))
+		self.failure = Stream(_iterqueue(self.failqueue))
 		
 		def feed_input():
-			for id, item in iterqueue(self.waitqueue):
+			while 1:
+				id, item = self.waitqueue.get()
 				if item is StopIteration:
 					break
 				else:
+					self.sema.acquire()
 					with self.lock:
 						if self.status[id] == 'SUBMITTED':
 							self.pool.inqueue.put((id, item))
 							self.status[id] = 'RUNNING'
+						else:
+							self.sema.release()
 			self.pool.inqueue.put(StopIteration)
 		self.inputfeeder_thread = threading.Thread(target=feed_input)
 		self.inputfeeder_thread.start()
 		
 		def track_result():
 			for id, item in self.pool:
+				self.sema.release()
 				with self.lock:
 					self.status[id] = 'FINISHED'
 				self.resultqueue.put(item)
@@ -903,6 +917,7 @@ class Executor(object):
 		
 		def track_failure():
 			for outval, exception in self.pool.failure:
+				self.sema.release()
 				id, item = outval
 				with self.lock:
 					self.status[id] = 'FAILED'
@@ -927,7 +942,8 @@ class Executor(object):
 		with self.lock:
 			for id in ids:
 				try:
-					self.status[id] = 'CANCELLED'
+					if self.status[id] == 'SUBMITTED':
+						self.status[id] = 'CANCELLED'
 				except KeyError:
 					pass
 	
@@ -937,14 +953,14 @@ class Executor(object):
 	
 	def shutdown(self):
 		"""Shut down the Executor.  Cancel all pending jobs.
-		Running workers will stop after finishing their current job item.
+		Running workers will stop after finishing their current job items.
 		
 		This call will block until all workers die.
 		"""
 		with self.lock:
 			self.pool.inqueue.put(StopIteration)
 			self.waitqueue.put((None, StopIteration))
-			iterqueue(self.waitqueue) >> item[-1]
+			_iterqueue(self.waitqueue) >> item[-1]
 		self.inputfeeder_thread.join()
 		self.resulttracker_thead.join()
 		self.failuretracker_thread.join()
@@ -1006,7 +1022,7 @@ class _PCollector(Stream):
 	def __repr__(self):
 		return '<Collector at %s>' % hex(id(self))
 
-if platform.system == "Windows":
+if sys.platform == "win32":
 	PCollector = _PCollector
 
 
@@ -1066,7 +1082,7 @@ class PSorter(Stream):
 		self.collector_thread = threading.Thread(target=collect)
 		self.collector_thread.start()
 		
-		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(iterqueue, self.inqueues))
+		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(_iterqueue, self.inqueues))
 		self.sorter_thread = sorter.thread
 		self.iterator = iter(sorter)
 	
@@ -1106,7 +1122,7 @@ class _PSorter(Stream):
 		self.collector_thread = threading.Thread(target=collect)
 		self.collector_thread.start()
 		
-		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(iterqueue, self.inqueues))
+		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(_iterqueue, self.inqueues))
 		self.sorter_thread = sorter.thread
 		self.iterator = iter(sorter)
 	
@@ -1116,7 +1132,7 @@ class _PSorter(Stream):
 	def __repr__(self):
 		return '<PSorter at %s>' % hex(id(self))
 
-if platform.system == "Windows":
+if sys.platform == "win32":
 	PSorter = _PSorter
 
 
@@ -1128,7 +1144,7 @@ class QSorter(Stream):
 		self.inqueues = []
 
 	def run(self):
-		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(iterqueue, self.inqueues))
+		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(_iterqueue, self.inqueues))
 		self.sorter_thread = sorter.thread
 		self.iterator = iter(sorter)
 	

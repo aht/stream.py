@@ -43,19 +43,19 @@ process to run the producer and feed generated items back to the pipeline, thus
 minimizing the time that the whole pipeline has to wait when the producer is
 blocking in system calls.
 
-If the order of processing does not matter, an AsyncThreadPool or
-AsyncProcessPool can be used.  They both utilize a number of workers in other
-theads or processes to work on items pulled from the piped input.  It is
-also possible to submit jobs to a thread/process pool concurrently.
+If the order of processing does not matter, an ThreadPool or ProcessPool
+can be used.  They both utilize a number of workers in other theads
+or processes to work on items pulled from the piped input.  It is also
+possible to submit jobs to a thread/process pool concurrently.
 
-Multiple streams can be piped to a single PCollector or QCollector, which will
-gather generated items whenever they are avaiable.  PCollectors can collect
-from ForkedFeeders or AsyncProcessPool (via system pipes) and QCollectors can
-collect from ThreadedFeeders and AsyncThreadPool (via queues).  PSorter and
-QSorter are also collectors, but given multiples sorted input streams (low to
-high), a P|QSorter will output items in sorted order.
+Multiple streams can be piped to a single PCollector or QCollector, which
+will gather generated items whenever they are avaiable.  PCollectors
+can collect from ForkedFeeder's or ProcessPool's (via system pipes) and
+QCollector's can collect from ThreadedFeeder's and ThreadPool's (via queues).
+PSorter and QSorter are also collectors, but given multiples sorted input
+streams (low to high), a Sorter will output items in sorted order.
 
-Using multiples Feeders and Collectors, one can implement many parallel
+Using multiples Feeder's and Collector's, one can implement many parallel
 processing patterns:  fan-in, fan-out, many-to-many map-reduce, etc.
 
 
@@ -692,13 +692,13 @@ class ForkedFeeder(collections.Iterable):
 
 #_____________________________________________________________________
 # Asynchronous stream filters using a pool of threads or processes
-			
 
-class AsyncThreadPool(Stream):
+_nCPU = multiprocessing.cpu_count()	
+
+class ThreadPool(Stream):
 	"""Work on the input stream asynchronously using a pool of threads.
 	
-	>>> square = lambda x: x*x
-	>>> results = range(10) >> AsyncThreadPool(map(square), 2) >> set
+	>>> results = range(10) >> ThreadPool(map(lambda x: x*x)) >> set
 	>>> results == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
 	True
 	
@@ -707,24 +707,24 @@ class AsyncThreadPool(Stream):
 	`failure` is a thead-safe iterator over the failqueue.  (The pool object
 	is still an iterable over the output values as before)
 
-	An alternate way to use AsyncThreadPool is to instantiate it, then submit
+	An alternate way to use ThreadPool is to instantiate it, then submit
 	jobs to its `inqueue` concurrently, using StopIteration to mark the end.
 	This would be necessary if failed jobs need to be resubmitted.
+	
+	See also: Executor
 	"""
-	def __init__(self, function, poolsize=multiprocessing.cpu_count(), args=[], kwargs={}):
+	def __init__(self, function, poolsize=_nCPU, args=[], kwargs={}):
 		"""function: an iterator-processing function, one that takes an
 		iterator and return an iterator
 		"""
-		super(AsyncThreadPool, self).__init__()
+		super(ThreadPool, self).__init__()
 		self.function = function
-		self.poolsize = poolsize
-		self.inqueue = Queue.Queue()
+		self.inqueue = Queue.Queue(poolsize)
 		self.outqueue = Queue.Queue()
 		self.failqueue = Queue.Queue()
-		self.failure = iterqueue(self.failqueue)
+		self.failure = Stream(iterqueue(self.failqueue))
 		self.finished = False
 		def work():
-			# We want to report bad input in case of failure
 			input, dupinput = itertools.tee(iterqueue(self.inqueue))
 			output = self.function(input, *args, **kwargs)
 			while 1:
@@ -756,22 +756,21 @@ class AsyncThreadPool(Stream):
 	def __call__(self, inpipe):
 		if self.finished:
 			raise BrokenPipe('All workers are dead, refusing to summit jobs. Use another Pool.')
-		def feeder():
+		def feed():
 			for item in inpipe:
 				self.inqueue.put(item)
 			self.inqueue.put(StopIteration)
-		self.feeder_thread = threading.Thread(target=feeder)
+		self.feeder_thread = threading.Thread(target=feed)
 		self.feeder_thread.start()
 	
 	def __repr__(self):
-		return '<AsyncThreadPool at %s>' % hex(id(self))
+		return '<ThreadPool at %s>' % hex(id(self))
 
 
-class AsyncProcessPool(Stream):
+class ProcessPool(Stream):
 	"""Work on the input stream asynchronously using a pool of processes.
 	
-	>>> square = lambda x: x*x
-	>>> results = range(10) >> AsyncProcessPool(map(square), 2) >> set
+	>>> results = range(10) >> ProcessPool(map(lambda x: x*x)) >> set
 	>>> results == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
 	True
 	
@@ -780,24 +779,25 @@ class AsyncProcessPool(Stream):
 	`failure` is a thead-safe iterator over the failqueue.  (The pool object
 	is still an iterable over the output values as before)
 
-	An alternate way to use AsyncProcessPool is to instantiate it, then submit
+	An alternate way to use ProcessPool is to instantiate it, then submit
 	jobs to its `inqueue` concurrently, using StopIteration to mark the end.
 	This would be necessary if failed jobs need to be resubmitted.
+	
+	See also: Executor
 	"""
-	def __init__(self, function, poolsize=multiprocessing.cpu_count(), args=[], kwargs={}):
+	def __init__(self, function, poolsize=_nCPU, args=[], kwargs={}):
 		"""function: an iterator-processing function, one that takes an
 		iterator and return an iterator
 		"""
-		super(AsyncProcessPool, self).__init__(function)
+		super(ProcessPool, self).__init__()
 		self.function = function
 		self.poolsize = poolsize
-		self.inqueue = multiprocessing.Queue()
+		self.inqueue = multiprocessing.Queue(poolsize)
 		self.outqueue = multiprocessing.Queue()
 		self.failqueue = multiprocessing.Queue()
-		self.failure = iterqueue(self.failqueue)
+		self.failure = Stream(iterqueue(self.failqueue))
 		self.finished = False
 		def work():
-			# We want to report bad input in case of failure
 			input, dupinput = itertools.tee(iterqueue(self.inqueue))
 			output = self.function(input, *args, **kwargs)
 			while 1:
@@ -822,7 +822,6 @@ class AsyncProcessPool(Stream):
 			self.finished = True
 		self.cleaner_thread = threading.Thread(target=cleanup)
 		self.cleaner_thread.start()
-
 	
 	def __iter__(self):
 		return iterqueue(self.outqueue)
@@ -830,15 +829,125 @@ class AsyncProcessPool(Stream):
 	def __call__(self, inpipe):
 		if self.finished:
 			raise BrokenPipe('All workers are dead, refusing to summit jobs. Use another Pool.')
-		def feeder():
+		def feed():
 			for item in inpipe:
 				self.inqueue.put(item)
 			self.inqueue.put(StopIteration)
-		self.feeder_thread = threading.Thread(target=feeder)
+		self.feeder_thread = threading.Thread(target=feed)
 		self.feeder_thread.start()
 	
 	def __repr__(self):
-		return '<AsyncProcessPool at %s>' % hex(id(self))
+		return '<ProcessPool at %s>' % hex(id(self))
+
+
+class Executor(object):
+	"""
+	Provide an API to submit and cancel jobs concurrently using a ThreadPool or ProcessPool.
+	
+	>>> executor = Executor(ThreadPool, map(lambda x: x*x))
+	>>> executor.submit(*range(10))
+	[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+	>>> executor.submit('foo')
+	[10]
+	>>> executor.finish()
+	>>> set(executor.result) == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
+	True
+	>>> list(executor.failure)
+	[('foo', TypeError("can't multiply sequence by non-int of type 'str'",))]
+	"""
+	def __init__(self, poolclass, function, poolsize=_nCPU, args=[], kwargs={}):
+		def process_with_id(input):
+			input, dupinput = itertools.tee(input)
+			id = iter(dupinput >> cut[0])
+			input = iter(input >> cut[1])
+			output = function(input)
+			for item in output:
+				yield next(id), item
+		self.pool = poolclass(process_with_id, poolsize=poolsize, args=args, kwargs=kwargs)
+		self.job_count = 0
+		self.status = []
+		if poolclass is ProcessPool:
+			self.waitqueue = multiprocessing.Queue()
+			self.resultqueue = multiprocessing.Queue()
+			self.failqueue = multiprocessing.Queue()
+			self.lock = multiprocessing.Lock()
+		else:
+			self.waitqueue = Queue.Queue()
+			self.resultqueue = Queue.Queue()
+			self.failqueue = Queue.Queue()
+			self.lock = threading.Lock()
+		self.result = Stream(iterqueue(self.resultqueue))
+		self.failure = Stream(iterqueue(self.failqueue))
+		
+		def feed_input():
+			for id, item in iterqueue(self.waitqueue):
+				if item is StopIteration:
+					break
+				else:
+					with self.lock:
+						if self.status[id] == 'SUBMITTED':
+							self.pool.inqueue.put((id, item))
+							self.status[id] = 'RUNNING'
+			self.pool.inqueue.put(StopIteration)
+		self.inputfeeder_thread = threading.Thread(target=feed_input)
+		self.inputfeeder_thread.start()
+		
+		def track_result():
+			for id, item in self.pool:
+				with self.lock:
+					self.status[id] = 'FINISHED'
+				self.resultqueue.put(item)
+			self.resultqueue.put(StopIteration)
+		self.resulttracker_thread = threading.Thread(target=track_result)
+		self.resulttracker_thread.start()
+		
+		def track_failure():
+			for outval, exception in self.pool.failure:
+				id, item = outval
+				with self.lock:
+					self.status[id] = 'FAILED'
+				self.failqueue.put((item, exception))
+			self.failqueue.put(StopIteration)
+		self.failuretracker_thread = threading.Thread(target=track_failure)
+		self.failuretracker_thread.start()
+	
+	def submit(self, *items):
+		"""Return a list of job ids corresponding to the submitted items."""
+		last_id = self.job_count
+		for item in items:
+			id = self.job_count
+			with self.lock:
+				self.waitqueue.put((id, item))
+				self.status.append('SUBMITTED')
+			self.job_count += 1
+		return range(last_id, id+1)
+	
+	def cancel(self, *ids):
+		"""Cancel jobs with associated ids."""
+		with self.lock:
+			for id in ids:
+				try:
+					self.status[id] = 'CANCELLED'
+				except KeyError:
+					pass
+	
+	def finish(self):
+		"""Indicate that there will be no more job submission."""
+		self.waitqueue.put((None, StopIteration))
+	
+	def shutdown(self):
+		"""Shut down the Executor.  Cancel all pending jobs.
+		Running workers will stop after finishing their current job item.
+		
+		This call will block until all workers die.
+		"""
+		with self.lock:
+			self.pool.inqueue.put(StopIteration)
+			self.waitqueue.put((None, StopIteration))
+			iterqueue(self.waitqueue) >> item[-1]
+		self.inputfeeder_thread.join()
+		self.resulttracker_thead.join()
+		self.failuretracker_thread.join()
 
 
 #_____________________________________________________________________
@@ -846,7 +955,7 @@ class AsyncProcessPool(Stream):
 
 
 class PCollector(Stream):
-	"""Collect items from a ForkedFeeder or AsyncProcessPool.
+	"""Collect items from a ForkedFeeder or ProcessPool.
 	"""
 	def __init__(self):
 		self.inpipes = []
@@ -869,7 +978,7 @@ class PCollector(Stream):
 
 
 class _PCollector(Stream):
-	"""Collect items from a ForkedFeeder or AsyncProcessPool.
+	"""Collect items from a ForkedFeeder or ProcessPool.
 
 	All input pipes are polled individually.  When none is ready, the
 	collector sleeps for a fix duration before polling again.
@@ -902,7 +1011,7 @@ if platform.system == "Windows":
 
 
 class QCollector(Stream):
-	"""Collect items from a ThreadedFeeder or AsyncThreadPool, or anything that
+	"""Collect items from a ThreadedFeeder or ThreadPool, or anything that
 	has an attribute `outqueue` from which we can get().
 	
 	All input queues are polled individually.  When none is ready, the
@@ -936,7 +1045,7 @@ class QCollector(Stream):
 
 class PSorter(Stream):
 	"""Merge sorted input (smallest to largest) coming from many
-	ForkedFeeder's or AsyncProcessPool's.
+	ForkedFeeder's or ProcessPool's.
 	"""
 	def __init__(self):
 		self.inpipes = []
@@ -970,7 +1079,7 @@ class PSorter(Stream):
 
 class _PSorter(Stream):
 	"""Merge sorted input (smallest to largest) coming from many
-	ForkedFeeder's or AsyncProcessPool's.
+	ForkedFeeder's or ProcessPool's.
 
 	All input pipes are polled individually.  When none is ready, the
 	collector thread will sleep for a fix duration before polling again.
@@ -1012,7 +1121,7 @@ if platform.system == "Windows":
 
 
 class QSorter(Stream):
-	"""Merge sorted input coming from many ThreadFeeder's or AsyncThreadPool's,
+	"""Merge sorted input coming from many ThreadFeeder's or ThreadPool's,
 	or anything that has an attribute `outqueue` from which we can get().
 	"""
 	def __init__(self):

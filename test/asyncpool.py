@@ -8,7 +8,7 @@ from random import randint
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from stream import filter, map, AsyncThreadPool, AsyncProcessPool
+from stream import filter, map, ThreadPool, ProcessPool
 
 
 ## Generate some data for testing
@@ -41,12 +41,12 @@ func = filter(lambda x: x&1)
 resultset = dataset >> map(lambda s: s >> func >> set) >> list
 
 def threadpool(i):
-	result = dataset[i] >> AsyncThreadPool(func, poolsize=2) >> set
+	result = dataset[i] >> ThreadPool(func, poolsize=2) >> set
 	pprint(result)
 	assert result == resultset[i]
 
-def procpool(i):
-	result = dataset[i] >> AsyncProcessPool(func, poolsize=2) >> set
+def processpool(i):
+	result = dataset[i] >> ProcessPool(func, poolsize=2) >> set
 	pprint(result)
 	assert result == resultset[i]
 
@@ -59,7 +59,7 @@ def test_threadpool():
 
 def test_procpool():
 	for i in range(len(dataset)):
-		yield procpool, i
+		yield processpool, i
 
 
 if __name__ == '__main__':

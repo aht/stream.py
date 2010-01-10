@@ -849,10 +849,8 @@ class Executor(object):
 	Provide fine-grained control over a ThreadPool or ProcessPool.
 	
 	>>> executor = Executor(ProcessPool, map(lambda x: x*x))
-	>>> executor.submit(*range(10))
-	[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-	>>> executor.submit('foo')
-	[10]
+	>>> job_ids = executor.submit(*range(10))
+	>>> foo_id = executor.submit('foo')
 	>>> executor.finish()
 	>>> set(executor.result) == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
 	True
@@ -871,22 +869,24 @@ class Executor(object):
 				          poolsize=poolsize,
 					    args=args,
 					    kwargs=kwargs)
-		self.job_count = 0
+		self.jobcount = 0
 		self.status = []
+		self.waitqueue = Queue.Queue()
 		if poolclass is ProcessPool:
-			self.waitqueue = multiprocessing.queues.SimpleQueue()
 			self.resultqueue = multiprocessing.queues.SimpleQueue()
 			self.failqueue = multiprocessing.queues.SimpleQueue()
-			self.lock = multiprocessing.Lock()
-			self.sema = multiprocessing.BoundedSemaphore(poolsize)
 		else:
-			self.waitqueue = Queue.Queue()
 			self.resultqueue = Queue.Queue()
 			self.failqueue = Queue.Queue()
-			self.lock = threading.Lock()
-			self.sema = threading.BoundedSemaphore(poolsize)
 		self.result = Stream(_iterqueue(self.resultqueue))
 		self.failure = Stream(_iterqueue(self.failqueue))
+		
+		self.statupdate_lock = threading.Lock()
+		## Acquired by trackers to update job statuses.
+
+		self.sema = threading.BoundedSemaphore(poolsize)
+		## Used to throttle transfer from waitqueue to pool.inqueue,
+		## acquired by input_feeder, released by trackers.
 		
 		def feed_input():
 			while 1:
@@ -895,7 +895,7 @@ class Executor(object):
 					break
 				else:
 					self.sema.acquire()
-					with self.lock:
+					with self.statupdate_lock:
 						if self.status[id] == 'SUBMITTED':
 							self.pool.inqueue.put((id, item))
 							self.status[id] = 'RUNNING'
@@ -908,7 +908,7 @@ class Executor(object):
 		def track_result():
 			for id, item in self.pool:
 				self.sema.release()
-				with self.lock:
+				with self.statupdate_lock:
 					self.status[id] = 'FINISHED'
 				self.resultqueue.put(item)
 			self.resultqueue.put(StopIteration)
@@ -919,7 +919,7 @@ class Executor(object):
 			for outval, exception in self.pool.failure:
 				self.sema.release()
 				id, item = outval
-				with self.lock:
+				with self.statupdate_lock:
 					self.status[id] = 'FAILED'
 				self.failqueue.put((item, exception))
 			self.failqueue.put(StopIteration)
@@ -928,23 +928,25 @@ class Executor(object):
 	
 	def submit(self, *items):
 		"""Return a list of job ids corresponding to the submitted items."""
-		last_id = self.job_count
+		last_id = self.jobcount
 		for item in items:
-			id = self.job_count
-			with self.lock:
-				self.waitqueue.put((id, item))
-				self.status.append('SUBMITTED')
-			self.job_count += 1
-		return range(last_id, id+1)
+			id = self.jobcount
+			self.jobcount += 1
+			self.status.append('SUBMITTED')
+			self.waitqueue.put((id, item))
+		if id > last_id:
+			return range(last_id, id+1)
+		else:
+			return id
 	
 	def cancel(self, *ids):
 		"""Cancel jobs with associated ids."""
-		with self.lock:
+		with self.statupdate_lock:
 			for id in ids:
 				try:
 					if self.status[id] == 'SUBMITTED':
 						self.status[id] = 'CANCELLED'
-				except KeyError:
+				except IndexError:
 					pass
 	
 	def finish(self):
@@ -957,7 +959,7 @@ class Executor(object):
 		
 		This call will block until all workers die.
 		"""
-		with self.lock:
+		with self.statupdate_lock:
 			self.pool.inqueue.put(StopIteration)
 			self.waitqueue.put((None, StopIteration))
 			_iterqueue(self.waitqueue) >> item[-1]

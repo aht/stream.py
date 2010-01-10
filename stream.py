@@ -46,7 +46,8 @@ blocking in system calls.
 If the order of processing does not matter, an ThreadPool or ProcessPool
 can be used.  They both utilize a number of workers in other theads
 or processes to work on items pulled from the piped input.  It is also
-possible to submit jobs to a thread/process pool concurrently.
+possible to submit jobs to a thread/process pool directly.  An Executor
+can perform fine-grained, concurrent job control for a thread/process pool.
 
 Multiple streams can be piped to a single PCollector or QCollector, which
 will gather generated items whenever they are avaiable.  PCollectors
@@ -846,7 +847,7 @@ class ProcessPool(Stream):
 
 class Executor(object):
 	"""
-	Provide fine-grained control over a ThreadPool or ProcessPool.
+	Provide a fine-grained level of control over a ThreadPool or ProcessPool.
 	
 	>>> executor = Executor(ProcessPool, map(lambda x: x*x))
 	>>> job_ids = executor.submit(*range(10))

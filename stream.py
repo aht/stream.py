@@ -45,9 +45,10 @@ blocking in system calls.
 
 If the order of processing does not matter, an ThreadPool or ProcessPool
 can be used.  They both utilize a number of workers in other theads
-or processes to work on items pulled from the piped input.  It is also
-possible to submit jobs to a thread/process pool directly.  An Executor
-can perform fine-grained, concurrent job control for a thread/process pool.
+or processes to work on items pulled from the input stream.  Their output
+are simply iterables respresented by the pool objects which can be used in
+pipelines.  Alternatively, an Executor can perform fine-grained, concurrent job
+control over a thread/process pool.
 
 Multiple streams can be piped to a single PCollector or QCollector, which
 will gather generated items whenever they are avaiable.  PCollectors
@@ -227,8 +228,7 @@ negative = lambda x: x and x < 0    ### since None < 0 == True
 
 
 class itemtaker(Stream):
-	"""
-	Slice the input stream, return a list.
+	"""Slice the input stream, return a list.
 
 	>>> a = itertools.count()
 	>>> a >> item[:10:2]
@@ -402,6 +402,10 @@ class Filter(Stream):
 class apply(Stream):
 	"""Invoke a function using each element of the input stream unpacked as
 	its argument list, a la itertools.starmap.
+
+	>>> vectoradd = lambda u,v: zip(u, v) >> apply(lambda x,y: x+y) >> list
+	>>> vectoradd([1, 2, 3], [4, 5, 6])
+	[5, 7, 9]
 	"""
 	def __init__(self, function):
 		"""function: to be called with each stream element unpacked as its
@@ -417,6 +421,10 @@ class apply(Stream):
 class map(Stream):
 	"""Invoke a function using each element of the input stream as its only
 	argument, a la itertools.imap.
+
+	>>> square = lambda x: x*x
+	>>> range(10) >> map(square) >> list
+	[0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
 	"""
 	def __init__(self, function):
 		"""function: to be called with each stream element as its
@@ -463,10 +471,9 @@ class fold(Filter):
 	the value returned by the function, thus it is, in effect, an
 	accumulation.
 	
-	This example calculate partial sums of the series 1 + 1/2 + 1/4 +...
-
-	>>> gseq(0.5) >> fold(operator.add) >> item[:5]
-	[1, 1.5, 1.75, 1.875, 1.9375]
+	This example calculate partial sums of the series 1 + 1/2 + 1/4 +...::
+	  >>> gseq(0.5) >> fold(operator.add) >> item[:5]
+	  [1, 1.5, 1.75, 1.875, 1.9375]
 	"""
 	def __init__(self, function, initval=None):
 		super(fold, self).__init__(function)
@@ -614,8 +621,8 @@ def _iterqueue(queue):
 	while 1:
 		item = queue.get()
 		if item is StopIteration:
-			# Re-broadcast, in case there is another thread blocking on
-			# queue.get().  That thread will receive StopIteration and
+			# Re-broadcast, in case there is another listener blocking on
+			# queue.get().  That listener will receive StopIteration and
 			# re-broadcast to the next one in line.
 			try:
 				queue.put(StopIteration)
@@ -714,10 +721,10 @@ class ThreadPool(Stream):
 	>>> results == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
 	True
 	
-	If an input value causes an Exception to be raised, the tuple
-	(value, exception) is put into the pool's `failqueue`. The attribute
-	`failure` is a thead-safe iterator over the failqueue.  (The pool object
-	is still an iterable over the output values as before)
+	The pool object is an iterable over the output values.  If an
+	input value causes an Exception to be raised, the tuple (value,
+	exception) is put into the pool's `failqueue`.  The attribute
+	`failure` is a thead-safe iterator over the `failqueue`.
 
 	An alternate way to use ThreadPool is to instantiate it, then submit
 	jobs to its `inqueue` concurrently, using StopIteration to mark the end.
@@ -791,10 +798,10 @@ class ProcessPool(Stream):
 	>>> results == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
 	True
 	
-	If an input value causes an Exception to be raised, the tuple
-	(value, exception) is put into the pool's `failqueue`. The attribute
-	`failure` is a thead-safe iterator over the failqueue.  (The pool object
-	is still an iterable over the output values as before)
+	The pool object is an iterable over the output values.  If an
+	input value causes an Exception to be raised, the tuple (value,
+	exception) is put into the pool's `failqueue`.  The attribute
+	`failure` is a thead-safe iterator over the `failqueue`.
 
 	An alternate way to use ProcessPool is to instantiate it, then submit
 	jobs to its `inqueue` concurrently, using StopIteration to mark the end.
@@ -863,17 +870,29 @@ class ProcessPool(Stream):
 
 
 class Executor(object):
-	"""
-	Provide a fine-grained level of control over a ThreadPool or ProcessPool.
+	"""Provide a fine-grained level of control over a ThreadPool or ProcessPool.
 	
-	>>> executor = Executor(ProcessPool, map(lambda x: x*x))
-	>>> job_ids = executor.submit(*range(10))
-	>>> foo_id = executor.submit('foo')
-	>>> executor.close()
-	>>> set(executor.result) == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
-	True
-	>>> list(executor.failure)
-	[('foo', TypeError("can't multiply sequence by non-int of type 'str'",))]
+	The constructor takes a pool class and arguments to its constructor::
+	  >>> executor = Executor(ProcessPool, map(lambda x: x*x))
+	
+	Job ids are returned when items are submitted::
+	  >>> executor.submit(*range(10))
+	  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+	  >>> executor.submit('foo')
+	  10
+	
+	A call to close() ends jobs submission.  Workers threads/processes
+	are now allowed to terminate after all jobs are completed::
+	  >>> executor.close()
+	
+	The `result` and `failure` attributes are simply iterators: their next()
+	calls will block until a next output is available, or raise StopIteration
+	if there is no more output.  We could do to them whatever we could do to
+	iterators::
+	  >>> set(executor.result) == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
+	  True
+	  >>> list(executor.failure)
+	  [('foo', TypeError("can't multiply sequence by non-int of type 'str'",))]
 	"""
 	def __init__(self, poolclass, function, poolsize=_nCPU, args=[], kwargs={}):
 		def process_job_id(input):
@@ -884,9 +903,9 @@ class Executor(object):
 			for item in output:
 				yield next(id), item
 		self.pool = poolclass(process_job_id,
-				          poolsize=poolsize,
-					    args=args,
-					    kwargs=kwargs)
+		                      poolsize=poolsize,
+		                      args=args,
+		                      kwargs=kwargs)
 		self.jobcount = 0
 		self._status = []
 		self.waitqueue = Queue.Queue()
@@ -924,7 +943,7 @@ class Executor(object):
 			for id, item in self.pool:
 				self.sema.release()
 				with self.lock:
-					self._status[id] = 'DONE'
+					self._status[id] = 'COMPLETED'
 				self.resultqueue.put(item)
 			self.resultqueue.put(StopIteration)
 		self.resulttracker_thread = threading.Thread(target=track_result)
@@ -953,13 +972,14 @@ class Executor(object):
 				self.waitqueue.put((id, item))
 				id += 1
 		if len(items) == 1:
-			return id
+			return id - 1
 		else:
 			return range(id - len(items), id)
 	
 	def cancel(self, *ids):
-		"""Try to cancel jobs with associated ids.  Return the actual number
-		of jobs cancelled.
+		"""Try to cancel jobs with associated ids.
+		
+		Return the actual number of jobs cancelled.
 		"""
 		ncancelled = 0
 		with self.lock:
@@ -973,15 +993,22 @@ class Executor(object):
 		return ncancelled
 
 	def status(self, *ids):
-		"""Return the statuses of jobs with associated ids at the time of call.
+		"""Return the statuses of jobs with associated ids at the
+		time of call:  either 'SUBMITED', 'CANCELLED', 'RUNNING',
+		'COMPLETED' or 'FAILED'.
 		"""
 		with self.lock:
-			return [self._status[i] for i in ids]
+			if len(ids) > 1:
+				return [self._status[i] for i in ids]
+			else:
+				return self._status[ids[0]]
 	
 	def close(self):
 		"""Signal that the executor will no longer accept job submission.
-		The `result` iterator attribute will exhaust after all submitted
-		items have been processed.
+
+		Worker threads/processes are now allowed to terminate after all
+		jobs have been are completed.  Without a call to close(), they will
+		stay around forever waiting for more jobs to come.
 		"""
 		with self.lock:
 			if self.closed:
@@ -991,7 +1018,7 @@ class Executor(object):
 	
 	def join(self):
 		"""Note that the Executor must be close()'d elsewhere,
-		otherwise join() will never return.
+		or join() will never return.
 		"""
 		self.inputfeeder_thread.join()
 		self.pool.join()
@@ -1000,9 +1027,9 @@ class Executor(object):
 	
 	def shutdown(self):
 		"""Shut down the Executor.  Suspend all waiting jobs.
+
 		Running workers will stop after finishing their current job items.
-		
-		This call will block until all workers die.
+		The call will block until all workers die.
 		"""
 		with self.lock:
 			self.pool.inqueue.put(StopIteration)   # Stop the pool workers
@@ -1010,6 +1037,11 @@ class Executor(object):
 			_iterqueue(self.waitqueue) >> item[-1] # Exhaust the waitqueue
 			self.closed = True
 		self.join()
+	
+	def __repr__(self):
+		return '<Executor(%s, poolsize=%s) at %s>' % (self.pool.__class__.__name__,
+		                                              self.pool.poolsize,
+									    hex(id(self)))
 
 
 #_____________________________________________________________________
@@ -1073,8 +1105,7 @@ if sys.platform == "win32":
 
 
 class QCollector(Stream):
-	"""Collect items from a ThreadedFeeder or ThreadPool, or anything that
-	has an attribute `outqueue` from which we can get().
+	"""Collect items from a ThreadedFeeder or ThreadPool.
 	
 	All input queues are polled individually.  When none is ready, the
 	collector sleeps for a fix duration before polling again.
@@ -1112,7 +1143,7 @@ class PSorter(Stream):
 	def __init__(self):
 		self.inpipes = []
 
-	def run(self):
+	def start(self):
 		self.inqueues = [Queue.Queue() for _ in xrange(len(self.inpipes))]
 		def collect():
 			# We make a shallow copy of self.inpipes, as we will be
@@ -1183,8 +1214,8 @@ if sys.platform == "win32":
 
 
 class QSorter(Stream):
-	"""Merge sorted input coming from many ThreadFeeder's or ThreadPool's,
-	or anything that has an attribute `outqueue` from which we can get().
+	"""Merge sorted input (smallest to largest) coming from many
+	ThreadFeeder's or ThreadPool's.
 	"""
 	def __init__(self):
 		self.inqueues = []
@@ -1231,8 +1262,9 @@ def gseq(ratio, initval=1):
 
 
 def repeatcall(func, *args):
-	"""Repeatedly call func(*args) and yield the result.  Useful when
-	func(*args) returns different results, esp. randomly.
+	"""Repeatedly call func(*args) and yield the result.
+	
+	Useful when func(*args) returns different results, esp. randomly.
 	"""
 	return itertools.starmap(func, itertools.repeat(args))
 
@@ -1267,7 +1299,7 @@ def minimum(key):
 	"""
 	Curried version of the built-in min.
 	
-	>>> Stream([[13, 52], [28, 35], [42, 6]]) >> minimum(lambda v: v[0] + v[1]) 
+	>>> Stream([[13, 52], [28, 35], [42, 6]]) >> minimum(lambda v: v[0] + v[1])
 	[42, 6]
 	"""
 	return lambda s: min(s, key=key)
@@ -1277,7 +1309,7 @@ def reduce(function, initval=None):
 	"""
 	Curried version of the built-in reduce.
 	
-	>>> reduce(lambda x, y: x+y)( [1, 2, 3, 4, 5] )
+	>>> reduce(lambda x,y: x+y)( [1, 2, 3, 4, 5] )
 	15
 	"""
 	if initval is None:

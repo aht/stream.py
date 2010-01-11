@@ -21,7 +21,7 @@ result = {
 def submit(poolclass, n):
 	e = Executor(poolclass, map(lambda x: x*x), poolsize=3)
 	e.submit(*range(n))
-	e.finish()
+	e.close()
 	assert sum(e.result) == result[n]
 
 def test_threadpool_submit():
@@ -44,7 +44,7 @@ def cancel(poolclass, n):
 	cancelled = e.cancel(*range(0, n, 2))
 	t1.join()
 	t2.join()
-	e.finish()
+	e.close()
 	completed = len(e.result >> list)
 	print completed, cancelled
 	assert completed + cancelled == n
@@ -56,6 +56,26 @@ def test_threadpool_cancel():
 def test_procpool_cancel():
 	for n in result.keys():
 		yield cancel, ProcessPool, n
+
+
+## Test shutdown
+
+def shutdown(poolclass, n):
+	e = Executor(poolclass, map(lambda x: x*x), poolsize=2)
+	e.submit(*range(n))
+	e.shutdown()
+	print e.result >> list
+	assert e.inputfeeder_thread.is_alive() == False
+	assert e.resulttracker_thread.is_alive() == False
+	assert e.failuretracker_thread.is_alive() == False
+
+def test_threadpool_shutdown():
+	for n in result.keys():
+		yield shutdown, ThreadPool, n
+
+def test_procpool_shutdown():
+	for n in result.keys():
+		yield shutdown, ProcessPool, n
 
 
 if __name__ == "__main__":

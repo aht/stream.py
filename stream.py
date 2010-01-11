@@ -216,14 +216,14 @@ class take(Stream):
 		self.items = []
 
 	def __call__(self, inpipe):
-		self.items =  list(itertools.islice(inpipe, self.n))
+		self.items = list(itertools.islice(inpipe, self.n))
 		return iter(self.items)
 
 	def __repr__(self):
 		return 'Stream(%s)' % repr(self.items)
 
 
-negative = lambda x: x and x<0		### since None < 0 == True
+negative = lambda x: x and x < 0    ### since None < 0 == True
 
 
 class itemtaker(Stream):
@@ -269,7 +269,10 @@ class itemtaker(Stream):
 				# since we don't know beforehand when the stream stops
 				n = -i if i else 1
 				items = collections.deque(itertools.islice(inpipe, None), maxlen=n)
-				return items[-n]
+				if items:
+					return items[-n]
+				else:
+					return []
 		else:
 			## a list is needed
 			if negative(self.slice.stop) or negative(self.slice.start) \
@@ -605,17 +608,21 @@ class tee(Stream):
 
 
 def _iterqueue(queue):
-	"""Turn a either a threading.Queue or a multiprocessing.queues.SimpleQueue
-	into an thread-safe iterator which will exhaust when StopIteration is put
-	into it.
-	"""
+	# Turn a either a threading.Queue or a multiprocessing.queues.SimpleQueue
+	# into an thread-safe iterator which will exhaust when StopIteration is
+	# put into it.
 	while 1:
 		item = queue.get()
 		if item is StopIteration:
 			# Re-broadcast, in case there is another thread blocking on
 			# queue.get().  That thread will receive StopIteration and
 			# re-broadcast to the next one in line.
-			queue.put(StopIteration)
+			try:
+				queue.put(StopIteration)
+			except IOError:
+				# Could happen if the Queue is based on a system pipe,
+				# and the other end was closed.
+				pass
 			break
 		else:
 			yield item
@@ -696,7 +703,9 @@ class ForkedFeeder(collections.Iterable):
 #_____________________________________________________________________
 # Asynchronous stream filters using a pool of threads or processes
 
+
 _nCPU = multiprocessing.cpu_count()	
+
 
 class ThreadPool(Stream):
 	"""Work on the input stream asynchronously using a pool of threads.
@@ -726,7 +735,7 @@ class ThreadPool(Stream):
 		self.outqueue = Queue.Queue()
 		self.failqueue = Queue.Queue()
 		self.failure = Stream(_iterqueue(self.failqueue))
-		self.finished = False
+		self.closed = False
 		def work():
 			input, dupinput = itertools.tee(_iterqueue(self.inqueue))
 			output = self.function(input, *args, **kwargs)
@@ -744,12 +753,13 @@ class ThreadPool(Stream):
 			self.worker_threads.append(t)
 			t.start()
 		def cleanup():
-			# Wait for all workers to finish, then signal the end of outqueue and failqueue.
+			# Wait for all workers to finish,
+			# then signal the end of outqueue and failqueue.
 			for t in self.worker_threads:
 				t.join()
 			self.outqueue.put(StopIteration)
 			self.failqueue.put(StopIteration)
-			self.finished = True
+			self.closed = True
 		self.cleaner_thread = threading.Thread(target=cleanup)
 		self.cleaner_thread.start()
 	
@@ -757,15 +767,18 @@ class ThreadPool(Stream):
 		return _iterqueue(self.outqueue)
 	
 	def __call__(self, inpipe):
-		if self.finished:
+		if self.closed:
 			raise BrokenPipe('All workers are dead, refusing to summit jobs. '
-					'Use another Pool.')
+			                 'Use another Pool.')
 		def feed():
 			for item in inpipe:
 				self.inqueue.put(item)
 			self.inqueue.put(StopIteration)
 		self.feeder_thread = threading.Thread(target=feed)
 		self.feeder_thread.start()
+	
+	def join(self):
+		self.cleaner_thread.join()
 	
 	def __repr__(self):
 		return '<ThreadPool at %s>' % hex(id(self))
@@ -800,7 +813,7 @@ class ProcessPool(Stream):
 		self.outqueue = multiprocessing.queues.SimpleQueue()
 		self.failqueue = multiprocessing.queues.SimpleQueue()
 		self.failure = Stream(_iterqueue(self.failqueue))
-		self.finished = False
+		self.closed = False
 		def work():
 			input, dupinput = itertools.tee(_iterqueue(self.inqueue))
 			output = self.function(input, *args, **kwargs)
@@ -818,12 +831,13 @@ class ProcessPool(Stream):
 			self.worker_processes.append(p)
 			p.start()
 		def cleanup():
-			# Wait for all workers to finish, then signal the end of outqueue and failqueue.
+			# Wait for all workers to finish,
+			# then signal the end of outqueue and failqueue.
 			for p in self.worker_processes:
 				p.join()
 			self.outqueue.put(StopIteration)
 			self.failqueue.put(StopIteration)
-			self.finished = True
+			self.closed = True
 		self.cleaner_thread = threading.Thread(target=cleanup)
 		self.cleaner_thread.start()
 	
@@ -831,15 +845,18 @@ class ProcessPool(Stream):
 		return _iterqueue(self.outqueue)
 	
 	def __call__(self, inpipe):
-		if self.finished:
+		if self.closed:
 			raise BrokenPipe('All workers are dead, refusing to summit jobs. '
-					'Use another Pool.')
+			                 'Use another Pool.')
 		def feed():
 			for item in inpipe:
 				self.inqueue.put(item)
 			self.inqueue.put(StopIteration)
 		self.feeder_thread = threading.Thread(target=feed)
 		self.feeder_thread.start()
+	
+	def join(self):
+		self.cleaner_thread.join()
 	
 	def __repr__(self):
 		return '<ProcessPool at %s>' % hex(id(self))
@@ -852,7 +869,7 @@ class Executor(object):
 	>>> executor = Executor(ProcessPool, map(lambda x: x*x))
 	>>> job_ids = executor.submit(*range(10))
 	>>> foo_id = executor.submit('foo')
-	>>> executor.finish()
+	>>> executor.close()
 	>>> set(executor.result) == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
 	True
 	>>> list(executor.failure)
@@ -871,7 +888,7 @@ class Executor(object):
 					    args=args,
 					    kwargs=kwargs)
 		self.jobcount = 0
-		self.status = []
+		self._status = []
 		self.waitqueue = Queue.Queue()
 		if poolclass is ProcessPool:
 			self.resultqueue = multiprocessing.queues.SimpleQueue()
@@ -881,27 +898,24 @@ class Executor(object):
 			self.failqueue = Queue.Queue()
 		self.result = Stream(_iterqueue(self.resultqueue))
 		self.failure = Stream(_iterqueue(self.failqueue))
+		self.closed = False
 		
-		self.statupdate_lock = threading.Lock()
-		## Acquired by trackers to update job statuses.
-
+		self.lock = threading.Lock()
+		## Acquired to submit and update job _statuses.
+		
 		self.sema = threading.BoundedSemaphore(poolsize)
 		## Used to throttle transfer from waitqueue to pool.inqueue,
 		## acquired by input_feeder, released by trackers.
 		
 		def feed_input():
-			while 1:
-				id, item = self.waitqueue.get()
-				if item is StopIteration:
-					break
-				else:
-					self.sema.acquire()
-					with self.statupdate_lock:
-						if self.status[id] == 'SUBMITTED':
-							self.pool.inqueue.put((id, item))
-							self.status[id] = 'RUNNING'
-						else:
-							self.sema.release()
+			for id, item in _iterqueue(self.waitqueue):
+				self.sema.acquire()
+				with self.lock:
+					if self._status[id] == 'SUBMITTED':
+						self.pool.inqueue.put((id, item))
+						self._status[id] = 'RUNNING'
+					else:
+						self.sema.release()
 			self.pool.inqueue.put(StopIteration)
 		self.inputfeeder_thread = threading.Thread(target=feed_input)
 		self.inputfeeder_thread.start()
@@ -909,8 +923,8 @@ class Executor(object):
 		def track_result():
 			for id, item in self.pool:
 				self.sema.release()
-				with self.statupdate_lock:
-					self.status[id] = 'FINISHED'
+				with self.lock:
+					self._status[id] = 'DONE'
 				self.resultqueue.put(item)
 			self.resultqueue.put(StopIteration)
 		self.resulttracker_thread = threading.Thread(target=track_result)
@@ -920,8 +934,8 @@ class Executor(object):
 			for outval, exception in self.pool.failure:
 				self.sema.release()
 				id, item = outval
-				with self.statupdate_lock:
-					self.status[id] = 'FAILED'
+				with self.lock:
+					self._status[id] = 'FAILED'
 				self.failqueue.put((item, exception))
 			self.failqueue.put(StopIteration)
 		self.failuretracker_thread = threading.Thread(target=track_failure)
@@ -929,13 +943,15 @@ class Executor(object):
 	
 	def submit(self, *items):
 		"""Return job ids assigned to the submitted items."""
-		with self.statupdate_lock:
+		with self.lock:
+			if self.closed:
+				raise BrokenPipe('Job submission has been closed.')
 			id = self.jobcount
-			self.status += ['SUBMITTED'] * len(items)
+			self._status += ['SUBMITTED'] * len(items)
 			self.jobcount += len(items)
-		for item in items:
-			self.waitqueue.put((id, item))
-			id += 1
+			for item in items:
+				self.waitqueue.put((id, item))
+				id += 1
 		if len(items) == 1:
 			return id
 		else:
@@ -946,33 +962,54 @@ class Executor(object):
 		of jobs cancelled.
 		"""
 		ncancelled = 0
-		with self.statupdate_lock:
+		with self.lock:
 			for id in ids:
 				try:
-					if self.status[id] == 'SUBMITTED':
-						self.status[id] = 'CANCELLED'
+					if self._status[id] == 'SUBMITTED':
+						self._status[id] = 'CANCELLED'
 						ncancelled += 1
 				except IndexError:
 					pass
 		return ncancelled
+
+	def status(self, *ids):
+		"""Return the statuses of jobs with associated ids at the time of call.
+		"""
+		with self.lock:
+			return [self._status[i] for i in ids]
 	
-	def finish(self):
-		"""Indicate that there will be no more job submission."""
-		self.waitqueue.put((None, StopIteration))
+	def close(self):
+		"""Signal that the executor will no longer accept job submission.
+		The `result` iterator attribute will exhaust after all submitted
+		items have been processed.
+		"""
+		with self.lock:
+			if self.closed:
+				return
+			self.waitqueue.put(StopIteration)
+			self.closed = True
+	
+	def join(self):
+		"""Note that the Executor must be close()'d elsewhere,
+		otherwise join() will never return.
+		"""
+		self.inputfeeder_thread.join()
+		self.pool.join()
+		self.resulttracker_thread.join()
+		self.failuretracker_thread.join()
 	
 	def shutdown(self):
-		"""Shut down the Executor.  Cancel all pending jobs.
+		"""Shut down the Executor.  Suspend all waiting jobs.
 		Running workers will stop after finishing their current job items.
 		
 		This call will block until all workers die.
 		"""
-		with self.statupdate_lock:
-			self.pool.inqueue.put(StopIteration)
-			self.waitqueue.put((None, StopIteration))
-			_iterqueue(self.waitqueue) >> item[-1]
-		self.inputfeeder_thread.join()
-		self.resulttracker_thead.join()
-		self.failuretracker_thread.join()
+		with self.lock:
+			self.pool.inqueue.put(StopIteration)   # Stop the pool workers
+			self.waitqueue.put(StopIteration)      # Stop the input_feeder
+			_iterqueue(self.waitqueue) >> item[-1] # Exhaust the waitqueue
+			self.closed = True
+		self.join()
 
 
 #_____________________________________________________________________

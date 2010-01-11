@@ -929,26 +929,32 @@ class Executor(object):
 	
 	def submit(self, *items):
 		"""Return a list of job ids corresponding to the submitted items."""
-		last_id = self.jobcount
+		id = self.jobcount
+		with self.statupdate_lock:
+			self.status += ['SUBMITTED'] * len(items)
+			self.jobcount += len(items)
 		for item in items:
-			id = self.jobcount
-			self.jobcount += 1
-			self.status.append('SUBMITTED')
 			self.waitqueue.put((id, item))
-		if id > last_id:
-			return range(last_id, id+1)
-		else:
+			id += 1
+		if len(items) == 1:
 			return id
+		else:
+			return range(id - len(items), id)
 	
 	def cancel(self, *ids):
-		"""Cancel jobs with associated ids."""
+		"""Try to cancel jobs with associated ids.  Return the actual number
+		of cancelled jobs.
+		"""
+		ncancelled = 0
 		with self.statupdate_lock:
 			for id in ids:
 				try:
 					if self.status[id] == 'SUBMITTED':
 						self.status[id] = 'CANCELLED'
+						ncancelled += 1
 				except IndexError:
 					pass
+		return ncancelled
 	
 	def finish(self):
 		"""Indicate that there will be no more job submission."""

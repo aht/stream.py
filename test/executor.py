@@ -37,9 +37,13 @@ def test_procpool_submit():
 
 def cancel(poolclass, n):
 	e = Executor(poolclass, map(lambda x: x*x), poolsize=2)
-	threading.Thread(target=lambda: e.submit(*range(n//2))).start()
-	threading.Thread(target=lambda: e.submit(*range(n//2))).start()
+	t1 = threading.Thread(target=lambda: e.submit(*range(n//2)))
+	t2 = threading.Thread(target=lambda: e.submit(*range(n//2)))
+	t1.start()
+	t2.start()
 	cancelled = e.cancel(*range(0, n, 2))
+	t1.join()
+	t2.join()
 	e.finish()
 	completed = len(e.result >> list)
 	print completed, cancelled

@@ -928,9 +928,9 @@ class Executor(object):
 		self.failuretracker_thread.start()
 	
 	def submit(self, *items):
-		"""Return a list of job ids corresponding to the submitted items."""
-		id = self.jobcount
+		"""Return job ids assigned to the submitted items."""
 		with self.statupdate_lock:
+			id = self.jobcount
 			self.status += ['SUBMITTED'] * len(items)
 			self.jobcount += len(items)
 		for item in items:
@@ -943,7 +943,7 @@ class Executor(object):
 	
 	def cancel(self, *ids):
 		"""Try to cancel jobs with associated ids.  Return the actual number
-		of cancelled jobs.
+		of jobs cancelled.
 		"""
 		ncancelled = 0
 		with self.statupdate_lock:

@@ -164,6 +164,7 @@ class Stream(collections.Iterable):
 		return self.iterator
 
 	def __call__(self, inpipe):
+		"""Append to the end of inpipe."""
 		return itertools.chain(inpipe, self.iterator)
 
 	def __pipe__(self, inpipe):
@@ -670,9 +671,9 @@ class ForkedFeeder(collections.Iterable):
 		"""Create a feeder that start the given generator with
 		*args and **kwargs in a child process. The feeder will
 		act as an eagerly evaluating proxy of the generator.
-
+		
 		The feeder can then be iter()'ed over by other processes.
-
+		
 		This should improve performance when the generator often
 		blocks in system calls.  Note that serialization could
 		be costly.
@@ -725,7 +726,7 @@ class ThreadPool(Stream):
 	input value causes an Exception to be raised, the tuple (value,
 	exception) is put into the pool's `failqueue`.  The attribute
 	`failure` is a thead-safe iterator over the `failqueue`.
-
+	
 	An alternate way to use ThreadPool is to instantiate it, then submit
 	jobs to its `inqueue` concurrently, using StopIteration to mark the end.
 	This would be necessary if failed jobs need to be resubmitted.
@@ -885,10 +886,11 @@ class Executor(object):
 	are now allowed to terminate after all jobs are completed::
 	  >>> executor.close()
 	
-	The `result` and `failure` attributes are simply iterators: their next()
-	calls will block until a next output is available, or raise StopIteration
-	if there is no more output.  We could do to them whatever we could do to
-	iterators::
+	The `result` and `failure` attributes are iterable (actually Stream
+	instances);  the returned iterators behave as follow:  their next() calls
+	will block until a next output is available, or raise StopIteration if
+	there is no more output.  Thus we could use the attributes `result` and
+	`failure` like any other iterables::
 	  >>> set(executor.result) == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
 	  True
 	  >>> list(executor.failure)
@@ -1005,7 +1007,7 @@ class Executor(object):
 	
 	def close(self):
 		"""Signal that the executor will no longer accept job submission.
-
+		
 		Worker threads/processes are now allowed to terminate after all
 		jobs have been are completed.  Without a call to close(), they will
 		stay around forever waiting for more jobs to come.
@@ -1027,9 +1029,9 @@ class Executor(object):
 	
 	def shutdown(self):
 		"""Shut down the Executor.  Suspend all waiting jobs.
-
-		Running workers will stop after finishing their current job items.
-		The call will block until all workers die.
+		
+		Running workers will terminate after finishing their current job items.
+		The call will block until all workers are terminated.
 		"""
 		with self.lock:
 			self.pool.inqueue.put(StopIteration)   # Stop the pool workers
@@ -1041,7 +1043,7 @@ class Executor(object):
 	def __repr__(self):
 		return '<Executor(%s, poolsize=%s) at %s>' % (self.pool.__class__.__name__,
 		                                              self.pool.poolsize,
-									    hex(id(self)))
+		                                              hex(id(self)))
 
 
 #_____________________________________________________________________
@@ -1116,7 +1118,7 @@ class QCollector(Stream):
 		"""
 		self.inqueues = []
 		self.waittime = waittime
-		def get():
+		def pollget():
 			while self.inqueues:
 				ready = [q for q in self.inqueues if not q.empty()]
 				if not ready:
@@ -1127,7 +1129,7 @@ class QCollector(Stream):
 						del self.inqueues[self.inqueues.index(q)]
 					else:
 						yield item
-		self.iterator = get()
+		self.iterator = pollget()
 	
 	def __pipe__(self, inpipe):
 		self.inqueues.append(inpipe.outqueue)

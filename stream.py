@@ -143,18 +143,27 @@ class Stream(collections.Iterable):
 	"""A class representing both a stream and a filter.
 
 	The outgoing stream is represented by the attribute 'iterator'.
-
-	The filter is represented by the method __call__(inpipe), which
-	combines self's iterator with inpipe's, returning a new iterator
-	representing a new outgoing stream.
+	
+	The filter is represented by the method __call__(iterator), which
+	processes the input iterator in certain way and returns a new iterator
+	representing the output of the Stream.
+	
+	By default, __call__(iterator) chains iterator with self.iterator,
+	appending itself to the input stream in effect.
+	
+	__pipe__(inpipe) defines the connection mechanism between Stream objects.
+	By default, it replaces self.iterator with the iterator returned by
+	__call__(iter(inpipe)).
 	
 	A Stream subclass will usually implement __call__, unless it is an
-	accumulator and will not return a Stream, in which case it needs to
-	implement __pipe__.  The default piping mechanism of Stream is appending
-	to the end of the its input (which had better terminate!).
-
-	>>> [1, 2, 3] >> Stream('foo') >> Stream('bar') >> list
-	[1, 2, 3, 'f', 'o', 'o', 'b', 'a', 'r']
+	accumulator and will not return a Stream, in which case it will need to
+	implement __pipe__.
+	
+	The `>>` operator works as follow: the expression `a >> b` means
+	`b.__pipe__(a) if hasattr(b, '__pipe__') else b(a)`.
+	
+	>>> [1, 2, 3] >> Stream([4, 5, 6]) >> list
+	[1, 2, 3, 4, 5, 6]
 	"""
 	def __init__(self, iterable=None):
 		"""Make a stream object from an interable."""
@@ -163,9 +172,9 @@ class Stream(collections.Iterable):
 	def __iter__(self):
 		return self.iterator
 
-	def __call__(self, inpipe):
-		"""Append to the end of inpipe."""
-		return itertools.chain(inpipe, self.iterator)
+	def __call__(self, iterator):
+		"""Append to the end of iterator."""
+		return itertools.chain(iterator, self.iterator)
 
 	def __pipe__(self, inpipe):
 		self.iterator = self.__call__(iter(inpipe))
@@ -190,11 +199,10 @@ class Stream(collections.Iterable):
 		return Stream.pipe(inpipe, self)
 
 	def extend(self, inpipe):
-		"""Similar to pipe(), except that extend() is an instance method,
-		and inpipe must be a Stream, in which case inpipe.iterator is
-		modified in-place.
+		"""Similar to __pipe__, except that iterator must be a Stream, in
+		which case inpipe.iterator will be modified in-place.
 		"""
-		inpipe.iterator = self.__call__(inpipe.iterator)
+		iterator.iterator = self.__call__(inpipe.iterator)
 		return inpipe
 
 	def __repr__(self):
@@ -217,8 +225,8 @@ class take(Stream):
 		self.n = n
 		self.items = []
 
-	def __call__(self, inpipe):
-		self.items = list(itertools.islice(inpipe, self.n))
+	def __call__(self, iterator):
+		self.items = list(itertools.islice(iterator, self.n))
 		return iter(self.items)
 
 	def __repr__(self):
@@ -236,10 +244,13 @@ class itemtaker(Stream):
 	[0, 2, 4, 6, 8]
 	>>> a >> item[:5]
 	[10, 11, 12, 13, 14]
+
 	>>> xrange(20) >> item[-5]
 	15
+
 	>>> xrange(20) >> item[-1]
 	19
+
 	>>> xrange(20) >> item[::-2]
 	[19, 17, 15, 13, 11, 9, 7, 5, 3, 1]
 	"""
@@ -310,14 +321,14 @@ class takei(Stream):
 		super(takei, self).__init__()
 		self.indexiter = iter(indices)
 
-	def __call__(self, inpipe):
+	def __call__(self, iterator):
 		def itaker():
 			old_idx = -1
 			idx = next(self.indexiter)                # next value to yield
 			counter = seq()
 			while 1:
 				c = next(counter)
-				elem = next(inpipe)
+				elem = next(iterator)
 				while idx <= old_idx:               # ignore bad values
 					idx = next(self.indexiter)
 				if c == idx:
@@ -338,9 +349,9 @@ class drop(Stream):
 		super(drop, self).__init__()
 		self.n = n
 
-	def __call__(self, inpipe):
-		collections.deque(itertools.islice(inpipe, self.n), maxlen=0)
-		return inpipe
+	def __call__(self, iterator):
+		collections.deque(itertools.islice(iterator, self.n), maxlen=0)
+		return iterator
 
 
 class dropi(Stream):
@@ -356,7 +367,7 @@ class dropi(Stream):
 		super(dropi, self).__init__()
 		self.indexiter = iter(indices)
 
-	def __call__(self, inpipe):
+	def __call__(self, iterator):
 		def idropper():
 			counter = seq()
 			def try_next_idx():
@@ -370,7 +381,7 @@ class dropi(Stream):
 			idx, exhausted = try_next_idx()                  # next value to discard
 			while 1:
 				c = next(counter)
-				elem = next(inpipe)
+				elem = next(iterator)
 				while not exhausted and idx <= old_idx:    # ignore bad values
 					idx, exhausted = try_next_idx()	
 				if c != idx:
@@ -396,8 +407,8 @@ class Filter(Stream):
 		super(Filter, self).__init__()
 		self.function = function
 	
-	def __call__(self, inpipe):
-		return self.function(inpipe)
+	def __call__(self, iterator):
+		return self.function(iterator)
 
 
 class apply(Stream):
@@ -415,8 +426,8 @@ class apply(Stream):
 		super(apply, self).__init__()
 		self.function = function
 
-	def __call__(self, inpipe):
-		return itertools.starmap(self.function, inpipe)
+	def __call__(self, iterator):
+		return itertools.starmap(self.function, iterator)
 
 
 class map(Stream):
@@ -434,8 +445,8 @@ class map(Stream):
 		super(map, self).__init__()
 		self.function = function
 
-	def __call__(self, inpipe):
-		return itertools.imap(self.function, inpipe)
+	def __call__(self, iterator):
+		return itertools.imap(self.function, iterator)
 
 
 class filter(Filter):
@@ -446,28 +457,28 @@ class filter(Filter):
 	>>> range(10) >> filter(even) >> list
 	[0, 2, 4, 6, 8]
 	"""
-	def __call__(self, inpipe):
-		return itertools.ifilter(self.function, inpipe)
+	def __call__(self, iterator):
+		return itertools.ifilter(self.function, iterator)
 
 
 class takewhile(Filter):
 	"""Take items from the input stream that come before the first item to
 	evaluate to False by the given function, a la itertools.takewhile.
 	"""
-	def __call__(self, inpipe):
-		return itertools.takewhile(self.function, inpipe)
+	def __call__(self, iterator):
+		return itertools.takewhile(self.function, iterator)
 
 
 class dropwhile(Filter):
 	"""Drop items from the input stream that come before the first item to
 	evaluate to False by the given function, a la itertools.dropwhile.
 	"""
-	def __call__(self, inpipe):
-		return itertools.dropwhile(self.function, inpipe)
+	def __call__(self, iterator):
+		return itertools.dropwhile(self.function, iterator)
 
 
 class fold(Filter):
-	"""Combines the elements of inpipe by applying a function of two argument
+	"""Combines the elements of iterator by applying a function of two argument
 	to a value and each element in turn.  At each step, the value is set to
 	the value returned by the function, thus it is, in effect, an
 	accumulation.
@@ -480,15 +491,15 @@ class fold(Filter):
 		super(fold, self).__init__(function)
 		self.initval = initval
 
-	def __call__(self, inpipe):
+	def __call__(self, iterator):
 		def folder():
 			if self.initval:
 				accumulated = self.initval
 			else:
-				accumulated = next(inpipe)
+				accumulated = next(iterator)
 			while 1:
 				yield accumulated
-				val = next(inpipe)
+				val = next(iterator)
 				accumulated = self.function(accumulated, val)
 		return folder()
 
@@ -508,10 +519,10 @@ class chop(Stream):
 		super(chop, self).__init__()
 		self.n = n
 
-	def __call__(self, inpipe):
+	def __call__(self, iterator):
 		def chopper():
 			while 1:
-				s = inpipe >> item[:self.n]
+				s = iterator >> item[:self.n]
 				if s:
 					yield s
 				else:
@@ -546,11 +557,11 @@ class flattener(Stream):
 	[0, 1, 2, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6, 7, 8]
 	"""
 	@staticmethod
-	def __call__(inpipe):
+	def __call__(iterator):
 		def flatten():
 			## Maintain a LIFO stack of iterators
 			stack = []
-			i = inpipe
+			i = iterator
 			while True:
 				try:
 					e = next(i)
@@ -582,12 +593,12 @@ class prepend(Stream):
 	>>> seq(7, 7) >> prepend(xrange(0, 10, 2)) >> item[:10]
 	[0, 2, 4, 6, 8, 7, 14, 21, 28, 35]
 	"""
-	def __call__(self, inpipe):
-		return itertools.chain(self.iterator, inpipe)
+	def __call__(self, iterator):
+		return itertools.chain(self.iterator, iterator)
 
 
 class tee(Stream):
-	"""Make a branch from a stream.
+	"""Make a T-split of the input stream.
 
 	>>> foo = filter(lambda x: x%3==0)
 	>>> bar = seq(0, 2) >> tee(foo)
@@ -732,9 +743,8 @@ _nCPU = multiprocessing.cpu_count()
 class ThreadPool(Stream):
 	"""Work on the input stream asynchronously using a pool of threads.
 	
-	>>> results = range(10) >> ThreadPool(map(lambda x: x*x)) >> set
-	>>> results == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
-	True
+	>>> range(10) >> ThreadPool(map(lambda x: x*x)) >> sum
+	285
 	
 	The pool object is an iterable over the output values.  If an
 	input value causes an Exception to be raised, the tuple (value,
@@ -803,15 +813,14 @@ class ThreadPool(Stream):
 		self.cleaner_thread.join()
 	
 	def __repr__(self):
-		return '<ThreadPool at %s>' % hex(id(self))
+		return '<ThreadPool(poolsize=%s) at %s>' % (self.poolsize, hex(id(self)))
 
 
 class ProcessPool(Stream):
 	"""Work on the input stream asynchronously using a pool of processes.
 	
-	>>> results = range(10) >> ProcessPool(map(lambda x: x*x)) >> set
-	>>> results == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
-	True
+	>>> range(10) >> ProcessPool(map(lambda x: x*x)) >> sum
+	285
 	
 	The pool object is an iterable over the output values.  If an
 	input value causes an Exception to be raised, the tuple (value,
@@ -881,7 +890,7 @@ class ProcessPool(Stream):
 		self.cleaner_thread.join()
 	
 	def __repr__(self):
-		return '<ProcessPool at %s>' % hex(id(self))
+		return '<ProcessPool(poolsize=%s) at %s>' % (self.poolsize, hex(id(self)))
 
 
 class Executor(object):
@@ -1065,7 +1074,7 @@ class Executor(object):
 
 
 class PCollector(Stream):
-	"""Collect items from a ForkedFeeder or ProcessPool.
+	"""Collect items from many ForkedFeeder's or ProcessPool's.
 	"""
 	def __init__(self):
 		self.inpipes = []
@@ -1088,7 +1097,7 @@ class PCollector(Stream):
 
 
 class _PCollector(Stream):
-	"""Collect items from a ForkedFeeder or ProcessPool.
+	"""Collect items from many ForkedFeeder's or ProcessPool's.
 
 	All input pipes are polled individually.  When none is ready, the
 	collector sleeps for a fix duration before polling again.
@@ -1121,7 +1130,7 @@ if sys.platform == "win32":
 
 
 class QCollector(Stream):
-	"""Collect items from a ThreadedFeeder or ThreadPool.
+	"""Collect items from many ThreadedFeeder's or ThreadPool's.
 	
 	All input queues are polled individually.  When none is ready, the
 	collector sleeps for a fix duration before polling again.

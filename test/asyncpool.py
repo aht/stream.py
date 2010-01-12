@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from stream import filter, map, ThreadPool, ProcessPool
 
 
-## Generate some data for testing
+## The test data
 
 dataset = []
 
@@ -34,11 +34,12 @@ for v in [10, 100, 1000] >> map(alternating):
 for v in [10, 100, 1000] >> map(randomized):
 	dataset.append(v)
 
-## The test cases
-
 func = filter(lambda x: x&1)
 
 resultset = dataset >> map(lambda s: s >> func >> set) >> list
+
+
+## Test scenario
 
 def threadpool(i):
 	result = dataset[i] >> ThreadPool(func, poolsize=2) >> set
@@ -51,13 +52,13 @@ def processpool(i):
 	assert result == resultset[i]
 
 
-## Test againts the generated data
+## Test cases
 
-def test_threadpool():
+def test_ThreadPool():
 	for i in range(len(dataset)):
 		yield threadpool, i
 
-def test_procpool():
+def test_ProcessPool():
 	for i in range(len(dataset)):
 		yield processpool, i
 

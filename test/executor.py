@@ -16,7 +16,7 @@ result = {
 }
 
 
-## Test submission and results, for sanity.
+## Test submission by a single thread.
 
 def submit(poolclass, n):
 	e = Executor(poolclass, map(lambda x: x*x), poolsize=3)
@@ -24,11 +24,11 @@ def submit(poolclass, n):
 	e.close()
 	assert sum(e.result) == result[n]
 
-def test_threadpool_submit():
+def test_ThreadPool_submit():
 	for n in result.keys():
 		yield submit, ThreadPool, n
 
-def test_procpool_submit():
+def test_ProcessPool_submit():
 	for n in result.keys():
 		yield submit, ProcessPool, n
 
@@ -49,11 +49,11 @@ def cancel(poolclass, n):
 	print completed, cancelled
 	assert completed + cancelled == n
 
-def test_threadpool_cancel():
+def test_ThreadPool_cancel():
 	for n in result.keys():
 		yield cancel, ThreadPool, n
 
-def test_procpool_cancel():
+def test_ProcessPool_cancel():
 	for n in result.keys():
 		yield cancel, ProcessPool, n
 
@@ -69,11 +69,11 @@ def shutdown(poolclass, n):
 	assert e.resulttracker_thread.is_alive() == False
 	assert e.failuretracker_thread.is_alive() == False
 
-def test_threadpool_shutdown():
+def test_ThreadPool_shutdown():
 	for n in result.keys():
 		yield shutdown, ThreadPool, n
 
-def test_procpool_shutdown():
+def test_ProcessPool_shutdown():
 	for n in result.keys():
 		yield shutdown, ProcessPool, n
 

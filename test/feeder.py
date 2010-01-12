@@ -11,7 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from stream import ThreadedFeeder, ForkedFeeder, map, reduce
 
 
-## Test script based on ../example/feeder.py
+## Test scenario based on ../example/feeder.py
 
 def blocking_producer():
 	n = 0
@@ -25,17 +25,21 @@ def blocking_producer():
 
 f = lambda x: x**2
 
-def test_feeder():
-	a = blocking_producer() >> map(f) >> reduce(operator.add)
-	b = ThreadedFeeder(blocking_producer) >> map(f) >> reduce(operator.add)
-	c = ForkedFeeder(blocking_producer) >> map(f) >> reduce(operator.add)
-	pprint(a)
-	pprint(b)
-	pprint(c)
-	assert a == b
-	assert a == c
-	assert b == c
-	
+expected = blocking_producer() >> map(f) >> reduce(operator.add)
+
+
+## Test cases
+
+def test_ThreadedFeeder():
+	result = ThreadedFeeder(blocking_producer) >> map(f) >> reduce(operator.add)
+	pprint(result)
+	assert result == expected
+
+def test_ForkedFeeder():
+	result = ForkedFeeder(blocking_producer) >> map(f) >> reduce(operator.add)
+	pprint(result)
+	assert result == expected
+
 
 if __name__ == '__main__':
 	import nose

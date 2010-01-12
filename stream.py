@@ -612,7 +612,7 @@ class tee(Stream):
 
 
 #_____________________________________________________________________
-# Threaded/forked feeder
+# _iterqueue and _iterrecv
 
 
 def _iterqueue(queue):
@@ -635,6 +635,25 @@ def _iterqueue(queue):
 		else:
 			yield item
 
+def _iterrecv(pipe):
+	# Turn a the receiving end of a multiprocessing.Connection object
+	# into an iterator which will exhaust when StopIteration is
+	# put into it.  _iterrecv is NOT safe to use by multiple threads.
+	while 1:
+		try:
+			item = pipe.recv()
+		except EOFError:
+			break
+		else:
+			if item is StopIteration:
+				break
+			else:
+				yield item
+
+
+#_____________________________________________________________________
+# Threaded/forked feeder
+
 
 class ThreadedFeeder(collections.Iterable):
 	def __init__(self, generator, *args, **kwargs):
@@ -647,20 +666,23 @@ class ThreadedFeeder(collections.Iterable):
 		This should improve performance when the generator often
 		blocks in system calls.
 		"""
-		self.output_queue = Queue.Queue()
+		self.outqueue = Queue.Queue()
 		def feeder():
 			i = generator(*args, **kwargs)
 			while 1:
 				try:
-					self.output_queue.put(next(i))
+					self.outqueue.put(next(i))
 				except StopIteration:
-					self.output_queue.put(StopIteration)
+					self.outqueue.put(StopIteration)
 					break
 		self.thread = threading.Thread(target=feeder)
 		self.thread.start()
 	
 	def __iter__(self):
-		return _iterqueue(self.output_queue)
+		return _iterqueue(self.outqueue)
+
+	def join(self):
+		self.thread.join()
 
 	def __repr__(self):
 		return '<ThreadedFeeder at %s>' % hex(id(self))
@@ -691,18 +713,10 @@ class ForkedFeeder(collections.Iterable):
 		self.process.start()
 	
 	def __iter__(self):
-		def iterrecv(pipe):
-			while 1:
-				try:
-					item = pipe.recv()
-				except EOFError:
-					break
-				else:
-					if item is StopIteration:
-						break
-					else:
-						yield item
-		return iterrecv(self.outpipe)
+		return _iterrecv(self.outpipe)
+
+	def join(self):
+		self.process.join()
 	
 	def __repr__(self):
 		return '<ForkedFeeder at %s>' % hex(id(self))
@@ -1047,7 +1061,7 @@ class Executor(object):
 
 
 #_____________________________________________________________________
-# Collectors
+# Collectors and Sorters
 
 
 class PCollector(Stream):
@@ -1146,73 +1160,18 @@ class PSorter(Stream):
 		self.inpipes = []
 
 	def start(self):
-		self.inqueues = [Queue.Queue() for _ in xrange(len(self.inpipes))]
-		def collect():
-			# We make a shallow copy of self.inpipes, as we will be
-			# mutating it but still need to refer to the correct queue index
-			qindex = copy.copy(self.inpipes).index
-			while self.inpipes:
-				ready, _, _ = select.select(self.inpipes, [], [])
-				for inpipe in ready:
-					item = inpipe.recv()
-					self.inqueues[qindex(inpipe)].put(item)
-					if item is StopIteration:
-						del self.inpipes[self.inpipes.index(inpipe)]
-		self.collector_thread = threading.Thread(target=collect)
-		self.collector_thread.start()
-		
-		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(_iterqueue, self.inqueues))
+		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(_iterrecv, self.inpipes))
 		self.sorter_thread = sorter.thread
 		self.iterator = iter(sorter)
 	
 	def __pipe__(self, inpipe):
 		self.inpipes.append(inpipe.outpipe)
-	
-	def __repr__(self):
-		return '<PSorter at %s>' % hex(id(self))
-
-
-class _PSorter(Stream):
-	"""Merge sorted input (smallest to largest) coming from many
-	ForkedFeeder's or ProcessPool's.
-
-	All input pipes are polled individually.  When none is ready, the
-	collector thread will sleep for a fix duration before polling again.
-	"""
-	def __init__(self, waittime=0.1):
-		self.inpipes = []
-		self.waittime = waittime
-
-	def run(self):
-		self.inqueues = [Queue.Queue() for _ in xrange(len(self.inpipes))]
-		def collect():
-			# We make a shallow copy of self.inpipes, as we will be
-			# mutating it but still need to refer to the correct queue index
-			qindex = copy.copy(self.inpipes).index
-			while self.inpipes:
-				ready = [p for p in self.inpipes if p.poll()]
-				if not ready:
-					time.sleep(self.waittime)
-				for inpipe in ready:
-					item = inpipe.recv()
-					self.inqueues[qindex(inpipe)].put(item)
-					if item is StopIteration:
-						del self.inpipes[self.inpipes.index(inpipe)]
-		self.collector_thread = threading.Thread(target=collect)
-		self.collector_thread.start()
 		
-		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(_iterqueue, self.inqueues))
-		self.sorter_thread = sorter.thread
-		self.iterator = iter(sorter)
-	
-	def __pipe__(self, inpipe):
-		self.inpipes.append(inpipe.outpipe)
-	
+	def join(self):
+		self.sorter_thread.join()
+
 	def __repr__(self):
 		return '<PSorter at %s>' % hex(id(self))
-
-if sys.platform == "win32":
-	PSorter = _PSorter
 
 
 class QSorter(Stream):
@@ -1222,13 +1181,16 @@ class QSorter(Stream):
 	def __init__(self):
 		self.inqueues = []
 
-	def run(self):
+	def start(self):
 		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(_iterqueue, self.inqueues))
 		self.sorter_thread = sorter.thread
 		self.iterator = iter(sorter)
 	
 	def __pipe__(self, inpipe):
-		self.inqueue.append(inpipe.outqueue)
+		self.inqueues.append(inpipe.outqueue)
+	
+	def join(self):
+		self.sorter_thread.join()
 	
 	def __repr__(self):
 		return '<PSorter at %s>' % hex(id(self))

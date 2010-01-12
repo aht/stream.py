@@ -901,7 +901,7 @@ class Executor(object):
 			input, dupinput = itertools.tee(input)
 			id = iter(dupinput >> cut[0])
 			input = iter(input >> cut[1])
-			output = function(input)
+			output = function(input, *args, **kwargs)
 			for item in output:
 				yield next(id), item
 		self.pool = poolclass(process_job_id,

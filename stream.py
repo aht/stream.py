@@ -239,68 +239,61 @@ negative = lambda x: x and x < 0    ### since None < 0 == True
 class itemtaker(Stream):
 	"""Slice the input stream, return a list.
 
-	>>> a = itertools.count()
-	>>> a >> item[:10:2]
+	>>> i = itertools.count()
+	>>> i >> item[:10:2]
 	[0, 2, 4, 6, 8]
-	>>> a >> item[:5]
+	>>> i >> item[:5]
 	[10, 11, 12, 13, 14]
 
 	>>> xrange(20) >> item[-5]
 	15
 
-	>>> xrange(20) >> item[-1]
-	19
-
 	>>> xrange(20) >> item[::-2]
 	[19, 17, 15, 13, 11, 9, 7, 5, 3, 1]
 	"""
-	def __init__(self, slice=None, get1=False):
-		self.slice = slice
-		self.get1 = get1
+	def __init__(self, key=None):
+		self.key = key
 
-	@classmethod
-	def __getitem__(cls, sliceobj):
-		if type(sliceobj) is type(1):
-			getter = cls(slice(sliceobj), True)
-		elif type(sliceobj) is type(slice(1)):
-			getter = cls(sliceobj, False)
+	@staticmethod
+	def __getitem__(key):
+		if (type(key) is int) or (type(key) is slice):
+			return itemtaker(key)
 		else:
-			raise TypeError('index must be an integer or a slice')
-		return getter
+			raise TypeError('key must be an integer or a slice')
 
 	def __pipe__(self, inpipe):
-		if self.get1:
+		i = iter(inpipe)
+		if type(self.key) is int:
 			## just one item is needed
-			i = self.slice.stop
-			if i > 0:
-				# throw away i values
-				collections.deque(itertools.islice(inpipe, i), maxlen=0)
-				return next(inpipe)
+			if self.key >= 0:
+				# throw away self.key items
+				collections.deque(itertools.islice(i, self.key), maxlen=0)
+				return next(i)
 			else:
-				# keep the last -i items
+				# keep the last -self.key items
 				# since we don't know beforehand when the stream stops
-				n = -i if i else 1
-				items = collections.deque(itertools.islice(inpipe, None), maxlen=n)
+				n = -self.key if self.key else 1
+				items = collections.deque(itertools.islice(i, None), maxlen=n)
 				if items:
 					return items[-n]
 				else:
 					return []
 		else:
 			## a list is needed
-			if negative(self.slice.stop) or negative(self.slice.start) \
-				or not (self.slice.start or self.slice.stop) \
-				or (not self.slice.start and negative(self.slice.step)) \
-				or (not self.slice.stop and not negative(self.slice.step)):
+			if negative(self.key.stop) or negative(self.key.start) \
+				or not (self.key.start or self.key.stop) \
+				or (not self.key.start and negative(self.key.step)) \
+				or (not self.key.stop and not negative(self.key.step)):
 				# force all evaluation
-				items = [i for i in inpipe]
+				items = [x for x in i]
 			else:
 				# force some evaluation
-				if negative(self.slice.step):
-					stop = self.slice.start
+				if negative(self.key.step):
+					stop = self.key.start
 				else:
-					stop = self.slice.stop
-				items = list(itertools.islice(inpipe, stop))
-			return items[self.slice]
+					stop = self.key.stop
+				items = list(itertools.islice(i, stop))
+			return items[self.key]
 
 	def __repr__(self):
 		return '<itemtaker at %s>' % hex(id(self))

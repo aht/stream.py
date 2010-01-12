@@ -607,19 +607,18 @@ class tee(Stream):
 	>>> foo >> item[:5]
 	[0, 6, 12, 18, 24]
 	"""
-	def __init__(self, streamobj):
+	def __init__(self, named_stream):
+		"""named_stream: a Stream object toward which the split branch
+		will be piped.
+		"""
 		super(tee, self).__init__()
-		self.streamobj = streamobj
+		self.named_stream = named_stream
 
 	def __pipe__(self, inpipe):
-		"""Make a branch of inpipe to pipe to self.streamobj"""
 		branch1, branch2 = itertools.tee(iter(inpipe))
-		Stream.pipe(branch1, self.streamobj)
-		if isinstance(inpipe, Stream):
-			inpipe.iterator = branch2
-			return inpipe
-		else:
-			return Stream(branch2)
+		self.iterator = branch1
+		Stream.pipe(branch2, self.named_stream)
+		return self
 
 
 #_____________________________________________________________________

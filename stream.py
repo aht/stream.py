@@ -922,7 +922,7 @@ class Executor(object):
 		self.closed = False
 		
 		self.lock = threading.Lock()
-		## Acquired to submit and update job _statuses.
+		## Acquired to submit and update job statuses.
 		
 		self.sema = threading.BoundedSemaphore(poolsize)
 		## Used to throttle transfer from waitqueue to pool.inqueue,
@@ -1118,7 +1118,7 @@ class QCollector(Stream):
 		"""
 		self.inqueues = []
 		self.waittime = waittime
-		def pollget():
+		def nonemptyget():
 			while self.inqueues:
 				ready = [q for q in self.inqueues if not q.empty()]
 				if not ready:
@@ -1129,7 +1129,7 @@ class QCollector(Stream):
 						del self.inqueues[self.inqueues.index(q)]
 					else:
 						yield item
-		self.iterator = pollget()
+		self.iterator = nonemptyget()
 	
 	def __pipe__(self, inpipe):
 		self.inqueues.append(inpipe.outqueue)

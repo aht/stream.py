@@ -8,24 +8,23 @@ from stream import ThreadedFeeder, ForkedFeeder, map, reduce
 Demonstrate the use of a feeder to minimize time spent by the whole pipeline
 waiting for a blocking producer.
 
-$ time python ./feeder.py		# use processes
+$ time python ./feeder.py     # use processes
 
 real    0m7.186s
 user    0m7.026s
 sys     0m0.033s
 
-time python ./feeder.py -t	# use threads
+time python ./feeder.py -t    # use threads
 
 real    0m7.231s
 user    0m7.046s
 sys     0m0.020s
 
-$ time python ./feeder.py -s	# sequential
+$ time python ./feeder.py -s  # sequential
 
 real    0m13.072s
 user    0m7.596s
 sys     0m0.067s
-
 """
 
 def blocking_producer():

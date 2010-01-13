@@ -1,10 +1,10 @@
-"""Lazily-evaluated stream with pipelining via the '>>' operator.
+"""Lazily-evaluated stream with pipelining and parallelization.
 
 Overview
 ========
 
 Streams are generalized iterators with a pipelining mechanism to enable
-data-flow programming.
+data-flow programming and easy parallelization.
 
 The idea is to take the output of a function that turn an iterable into
 another iterable and plug that as the input of another such function.
@@ -17,17 +17,17 @@ a number of filters.  Multiple streams can be branched and combined.
 Finally, the output is fed to an accumulator, which can be any function
 of one iterable argument.
 
-**Producers**:  anything iterable
+Producers:  anything iterable
 	+ from this module:  seq, gseq, repeatcall, chaincall
 
-**Filters**:
+Filters:
 	+ by index:  take, drop, takei, dropi
 	+ by condition:  filter, takewhile, dropwhile
 	+ by transformation:  apply, map, fold
 	+ by combining streams:  prepend, tee
 	+ for special purpose:  chop, cut, flatten
 
-**Accumulators**:  item, maximum, minimum, reduce
+Accumulators:  item, maximum, minimum, reduce
 	+ from Python:  list, sum, dict, max, min ...
 
 Values are computed only when an accumulator forces some or all evaluation
@@ -35,7 +35,9 @@ Values are computed only when an accumulator forces some or all evaluation
 
 
 Parallelization
----------------
+===============
+
+All parts of a pipeline can be parallelized using multiple threads or processes.
 
 When a producer is doing blocking I/O, it is possible to use a ThreadedFeeder
 or ForkedFeeder to improve performance.  The feeder will start a thread or a
@@ -65,41 +67,7 @@ Articles
 ========
 
 Articles written about this module by the author can be retrieved from
-<http://blog.onideas.ws/project:stream.py>.
-
-
-Examples
-========
-
-Slicing iterators
------------------
-::
-
-  >>> from itertools import count
-  >>> c = count()
-  >>> c >> item[1:10:2]
-  [1, 3, 5, 7, 9]
-  >>> c >> item[:5]
-  [10, 11, 12, 13, 14]
-
-String processing
------------------
-Grep some lines matching a regex from a file, cut out the 4th field
-separated by ' ', ':' or '.', then save as a list::
-
-    import re
-    s = open('file') \
-      >> filter(re.compile(regex).search) \
-      >> map(re.compile(' |:|\.').split) \
-      >> map(itemgetter(3)) \
-      >> list
-
-Partial sums
-------------
-Compute the first few partial sums of the geometric series 1 + 1/2 + 1/4 + ..::
-
-    >>> gseq(0.5) >> fold(operator.add) >> item[:5]
-    [1, 1.5, 1.75, 1.875, 1.9375]
+<http://blog.onideas.ws/tag/project:stream.py>.
 """
 
 __version__ = '0.8'
@@ -140,12 +108,12 @@ class BrokenPipe(Exception):
 
 
 class Stream(collections.Iterable):
-	"""A class representing both a stream and a filter.
+	"""A stream is both a lazy list and an iterator-processing function.
 
-	The outgoing stream is represented by the attribute 'iterator'.
+	The lazy list is represented by the attribute 'iterator'.
 	
-	The filter is represented by the method __call__(iterator), which
-	processes the input iterator in certain way and returns a new iterator
+	The iterator-processing function is represented by the method
+	__call__(iterator), which should return a new iterator
 	representing the output of the Stream.
 	
 	By default, __call__(iterator) chains iterator with self.iterator,
@@ -166,7 +134,7 @@ class Stream(collections.Iterable):
 	[1, 2, 3, 4, 5, 6]
 	"""
 	def __init__(self, iterable=None):
-		"""Make a stream object from an interable."""
+		"""Make a Stream object from an iterable."""
 		self.iterator = iter(iterable if iterable else [])
 
 	def __iter__(self):
@@ -198,19 +166,20 @@ class Stream(collections.Iterable):
 	def __rrshift__(self, inpipe):
 		return Stream.pipe(inpipe, self)
 
-	def extend(self, inpipe):
-		"""Similar to __pipe__, except that iterator must be a Stream, in
-		which case inpipe.iterator will be modified in-place.
+	def extend(self, outpipe):
+		"""Similar to __pipe__, except that outpipe must be a Stream, in
+		which case self.iterator will be modified in-place by calling
+		outpipe.__call__ on it.
 		"""
-		iterator.iterator = self.__call__(inpipe.iterator)
-		return inpipe
+		self.iterator = outpipe.__call__(self.iterator)
+		return self
 
 	def __repr__(self):
 		return 'Stream(%s)' % repr(self.iterator)
 
 
 #_______________________________________________________________________
-# Filtering streams by element indices
+# Process streams by element indices
 
 
 class take(Stream):
@@ -244,9 +213,6 @@ class itemtaker(Stream):
 	[0, 2, 4, 6, 8]
 	>>> i >> item[:5]
 	[10, 11, 12, 13, 14]
-
-	>>> xrange(20) >> item[-5]
-	15
 
 	>>> xrange(20) >> item[::-2]
 	[19, 17, 15, 13, 11, 9, 7, 5, 3, 1]
@@ -302,7 +268,7 @@ item = itemtaker()
 
 
 class takei(Stream):
-	"""Select elements of the input stream by indices.
+	"""Take elements of the input stream by indices.
 
 	>>> seq() >> takei(xrange(2, 43, 4)) >> list
 	[2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42]
@@ -386,7 +352,7 @@ class dropi(Stream):
 
 
 #_______________________________________________________________________
-# Filtering streams with functions and higher-order ones
+# Process streams with functions and higher-order ones
 
 
 class Filter(Stream):
@@ -442,7 +408,7 @@ class map(Stream):
 		return itertools.imap(self.function, iterator)
 
 
-class filter(Filter):
+class filter(Stream):
 	"""Filter the input stream, selecting only values which evaluates to True
 	by the given function, a la itertools.ifilter.
 
@@ -450,38 +416,63 @@ class filter(Filter):
 	>>> range(10) >> filter(even) >> list
 	[0, 2, 4, 6, 8]
 	"""
+	def __init__(self, function):
+		"""function: to be called with each stream element as its
+		only argument
+		"""
+		super(filter, self).__init__()
+		self.function = function
+
 	def __call__(self, iterator):
 		return itertools.ifilter(self.function, iterator)
 
 
-class takewhile(Filter):
+class takewhile(Stream):
 	"""Take items from the input stream that come before the first item to
 	evaluate to False by the given function, a la itertools.takewhile.
 	"""
+	def __init__(self, function):
+		"""function: to be called with each stream element as its
+		only argument
+		"""
+		super(takewhile, self).__init__()
+		self.function = function
+
 	def __call__(self, iterator):
 		return itertools.takewhile(self.function, iterator)
 
 
-class dropwhile(Filter):
+class dropwhile(Stream):
 	"""Drop items from the input stream that come before the first item to
 	evaluate to False by the given function, a la itertools.dropwhile.
 	"""
+	def __init__(self, function):
+		"""function: to be called with each stream element as its
+		only argument
+		"""
+		super(dropwhile, self).__init__()
+		self.function = function
+
 	def __call__(self, iterator):
 		return itertools.dropwhile(self.function, iterator)
 
 
-class fold(Filter):
-	"""Combines the elements of iterator by applying a function of two argument
-	to a value and each element in turn.  At each step, the value is set to
-	the value returned by the function, thus it is, in effect, an
+class fold(Stream):
+	"""Combines the elements of the input stream by applying a function of two
+	argument to a value and each element in turn.  At each step, the value is
+	set to the value returned by the function, thus it is, in effect, an
 	accumulation.
 	
-	This example calculate partial sums of the series 1 + 1/2 + 1/4 +...::
-	  >>> gseq(0.5) >> fold(operator.add) >> item[:5]
-	  [1, 1.5, 1.75, 1.875, 1.9375]
+	Intermediate values are yielded (similar to Haskell `scanl`).
+
+	This example calculate partial sums of the series 1 + 1/2 + 1/4 +...
+	
+	>>> gseq(0.5) >> fold(operator.add) >> item[:5]
+	[1, 1.5, 1.75, 1.875, 1.9375]
 	"""
 	def __init__(self, function, initval=None):
-		super(fold, self).__init__(function)
+		super(fold, self).__init__()
+		self.function = function
 		self.initval = initval
 
 	def __call__(self, iterator):
@@ -498,7 +489,7 @@ class fold(Filter):
 
 
 #_____________________________________________________________________
-# Special purpose stream filters
+# Special purpose stream processors
 
 
 class chop(Stream):
@@ -577,7 +568,7 @@ flatten = flattener()
 
 
 #_______________________________________________________________________
-# Combining multiple streams
+# Combine multiple streams
 
 
 class prepend(Stream):
@@ -726,7 +717,7 @@ class ForkedFeeder(collections.Iterable):
 
 
 #_____________________________________________________________________
-# Asynchronous stream filters using a pool of threads or processes
+# Asynchronous stream processing using a pool of threads or processes
 
 
 _nCPU = multiprocessing.cpu_count()	
@@ -889,9 +880,11 @@ class Executor(object):
 	"""Provide a fine-grained level of control over a ThreadPool or ProcessPool.
 	
 	The constructor takes a pool class and arguments to its constructor::
+
 	  >>> executor = Executor(ProcessPool, map(lambda x: x*x))
 	
 	Job ids are returned when items are submitted::
+
 	  >>> executor.submit(*range(10))
 	  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 	  >>> executor.submit('foo')
@@ -899,13 +892,15 @@ class Executor(object):
 	
 	A call to close() ends jobs submission.  Workers threads/processes
 	are now allowed to terminate after all jobs are completed::
+
 	  >>> executor.close()
 	
-	The `result` and `failure` attributes are iterable (actually Stream
-	instances);  the returned iterators behave as follow:  their next() calls
-	will block until a next output is available, or raise StopIteration if
-	there is no more output.  Thus we could use the attributes `result` and
-	`failure` like any other iterables::
+	The `result` and `failure` attributes are Stream instances and
+	thus iterable.  The returned iterators behave as follow: their
+	next() calls will block until a next output is available, or
+	raise StopIteration if there is no more output.  Thus we could use
+	the attributes `result` and `failure` like any other iterables::
+
 	  >>> set(executor.result) == set([0, 1, 4, 9, 16, 25, 36, 49, 64, 81])
 	  True
 	  >>> list(executor.failure)
@@ -1085,7 +1080,7 @@ class PCollector(Stream):
 		self.inpipes.append(inpipe.outpipe)
 	
 	def __repr__(self):
-		return '<Collector at %s>' % hex(id(self))
+		return '<PCollector at %s>' % hex(id(self))
 
 
 class _PCollector(Stream):
@@ -1115,7 +1110,7 @@ class _PCollector(Stream):
 		self.inpipes.append(inpipe.outpipe)
 	
 	def __repr__(self):
-		return '<Collector at %s>' % hex(id(self))
+		return '<QCollector at %s>' % hex(id(self))
 
 if sys.platform == "win32":
 	PCollector = _PCollector

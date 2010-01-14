@@ -52,14 +52,16 @@ Generators
 
 .. function:: seq([start=0, step=1])
 
-    An arithmetic sequence generator.  Works with any type with ``+`` defined.
+    An arithmetic sequence generator.
+    Works with any type with ``+`` defined.
     
     >>> seq(1, 0.25) >> item[:10]
     [1, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25]
 
 .. function:: gseq(ratio[, initval=1])
    
-   A geometric sequence generator.  Works with any type with ``*`` defined.
+   A geometric sequence generator.
+   Works with any type with ``*`` defined.
 
    >>> from decimal import Decimal
    >>> gseq(Decimal('.2')) >> item[:4]
@@ -67,8 +69,8 @@ Generators
 
 .. function:: repeatcall(func[, \*args])
    
-   Repeatedly call `func(\*args)` and yield the result.  Useful when
-   `func(\*args)` returns different results, esp. randomly.
+   Repeatedly call `func(\*args)` and yield the result.
+   Useful when `func(\*args)` returns different results, esp. randomly.
 
 .. function:: chaincall(func, initval)
 
@@ -91,13 +93,13 @@ All processors take an iterable or a :class:`Stream` instance, and return a
 
 .. function:: takei(indices)
 
-   Take elements of the input stream by index.  `indices` should be an iterable
-   over the list of indeices to be taken.
+   Take elements of the input stream by index.
+   `indices` should be an iterable over the list of indices to be taken.
 
 .. function:: dropi(indices)
 
-   Drop elements of the input stream by index.  `indices` should be an iterable
-   over the list of indeices to be dropped.
+   Drop elements of the input stream by index.
+   `indices` should be an iterable over the list of indices to be dropped.
 
 .. function:: chop(n)
 
@@ -274,7 +276,7 @@ Asynchronous Pool
 
 If the order of output does not matter given an input stream, a
 :class:`ThreadPool` or :class:`ProcessPool` can be used to speed up the task.
-They both utilize a number of workers in other theads or processes to work on
+They both utilize a number of workers in other threads or processes to work on
 items pulled from the input stream asynchronously.
 
 A pool instance is a :class:`Stream` object and thus is pipeable and can be
@@ -376,7 +378,7 @@ Mergers
 
 Multiple concurrent streams can be piped to a single :class:`PCollector` or
 :class:`QCollector`, which will gather generated items whenever they are
-avaiable.  PCollectors can collect from :class:`ForkedFeeder`'s or
+available.  PCollectors can collect from :class:`ForkedFeeder`'s or
 :class:`ProcessPool`'s (via system pipes) and QCollector's can collect from
 :class:`ThreadedFeeder`'s and :class:`ThreadPool`'s (via queues).
 

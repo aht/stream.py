@@ -32,7 +32,6 @@
         {%- endif %}
         {%- endblock %}
       </div>
-	{{ sidebar() }}
       <div class="content">
         {#{%- if display_toc %}
         <div id="toc">
@@ -42,4 +41,5 @@
         {%- endif %}#}
         {% block body %}{% endblock %}
       </div>
+	{{ sidebar() }}
 {% endblock %}

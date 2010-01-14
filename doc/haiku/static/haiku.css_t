@@ -48,7 +48,7 @@ div.sphinxsidebar {
     float: left;
     display: inline;
     position: relative;
-    width: 280px;
+    width: 360px;
     margin: 0;
 }
 
@@ -163,10 +163,10 @@ a.headerlink:hover {
 
 div.content {
     margin-top: 20px;
-    margin-left: 80px;
+    margin-right: 20px;
     margin-bottom: 50px;
     font-size: 0.9em;
-    width: 600px;
+    width: 580px;
     display: inline;
     float: left;
     position: relative;
@@ -388,7 +388,7 @@ pre {
     border-style: dotted;
     border-width: thin;
     margin: 0 0 12px 0;
-    padding: 0.75em 0.75em 0.75em 2em;
+    padding: 0.75em 0.5em 0.75em 1em;
     background-color: #f0f0f0;
     font-size: 0.85em;
 }

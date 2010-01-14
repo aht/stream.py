@@ -227,7 +227,7 @@ Accumulators
    Curried version of the built-in :func:`min`.
 
    >>> Stream([[13, 52], [28, 35], [42, 6]]) >> minimum(lambda v: v[0] + v[1])
-    [42, 6]
+   [42, 6]
 
 .. function:: stream.reduce(function, initval=None)
 

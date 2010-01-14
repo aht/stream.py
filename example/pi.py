@@ -9,19 +9,22 @@ from stream import Stream, Filter, seq, gseq, apply, map, fold, zip, item, drop
 """
 Compute digits of pi using the Gregory series, and its accelerated variants.
 
-For a detailed explanation, see this section of SICP:
+Inspired by this section of the wizard book (SICP):
 <http://mitpress.mit.edu/sicp/full-text/sicp/book/node72.html>
 """
 
 def alt_sign(s):
-	"""Alternate the sign of elements of the input stream by multiply it with
+	"""Alternate the sign of numbers of the input stream by multiply it with
 	the unit alternating series 1, -1, ...
 	"""
 	return zip(s, gseq(-1, initval=1)) >> apply(operator.mul)
 
 
 def Gregory(type=float):
-	"""Return partial sums of the Gregory series converging to atan(1) == pi/4"""
+	"""Return partial sums of the Gregory series converging to atan(1) == pi/4.
+
+	Yield 1 - 1/3 + 1/5 - 1/7 + ... computed with the given type.
+	"""
 	return seq(type(1), step=2) >> map(lambda x: 1/x) >> alt_sign >> fold(operator.add)
 
 

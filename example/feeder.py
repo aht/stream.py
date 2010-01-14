@@ -14,7 +14,7 @@ real    0m7.186s
 user    0m7.026s
 sys     0m0.033s
 
-time python ./feeder.py -t    # use threads
+$ time python ./feeder.py -t   # use threads
 
 real    0m7.231s
 user    0m7.046s
@@ -28,14 +28,9 @@ sys     0m0.067s
 """
 
 def blocking_producer():
-	n = 0
-	while 1:
-		time.sleep(0.05)
-		n += 1
-		if n < 100:
-			yield 42
-		else:
-			raise StopIteration
+	for n in range(25):
+		time.sleep(0.01)
+		yield 42
 
 if __name__ == '__main__':
 	f = lambda x: x**x**3

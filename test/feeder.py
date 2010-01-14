@@ -14,14 +14,9 @@ from stream import ThreadedFeeder, ForkedFeeder, map, reduce
 ## Test scenario based on ../example/feeder.py
 
 def blocking_producer():
-	n = 0
-	while 1:
+	for n in range(25):
 		time.sleep(0.01)
-		n += 1
-		if n < 25:
-			yield 42
-		else:
-			raise StopIteration
+		yield 42
 
 f = lambda x: x**2
 

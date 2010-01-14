@@ -480,7 +480,7 @@ is both a lazy list of items and an iterator-processing function.
       By default, it replaces `self.iterator` with the one returned by
       ``self.__call__(iter(inpipe))``.
 
-The following are constructor of :class:`Stream`-derived classes: :func:`take`,
+The following are constructors of :class:`Stream`-derived classes: :func:`take`,
 :func:`drop`, :func:`takei`, :func:`dropi`, :func:`chop`, :func:`filter`,
 :func:`takewhile`, :func:`dropwhile`, :func:`apply`, :func:`map`, :func:`fold`,
 :func:`prepend`, :func:`tee`, :class:`ProcessPool`, :class:`ThreadPool`,

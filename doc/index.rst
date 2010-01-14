@@ -6,10 +6,10 @@
 .. moduleauthor:: Anh Hai Trinh <anh.hai.trinh@gmail.com>
 
 
-Streams are generalized iterators with a pipelining mechanism to enable
-data-flow programming and easy parallelization.
+Streams are iterators with a pipelining mechanism to enable data-flow
+programming and easy parallelization.
 
-The idea is to take the output of a function that turn an iterable into
+The idea is to take the output of a function that turns an iterable into
 another iterable and plug that as the input of another such function.
 While you can already do this using function composition, this package
 provides an elegant notation for it by overloading the ``>>`` operator.
@@ -37,15 +37,16 @@ of one iterable argument.
 Values are computed only when an accumulator forces some or all evaluation
 (not when the stream are set up).
 
-All parts of a pipeline can be **parallelized** using multiple threads or
-processes.  Blocking producers can be fed from another thread or process by a
+All parts of a pipeline can be **parallelized** using threads or processes.  A
+blocking producer can be fed from another thread or process by a
 :class:`ThreadedFeeder` or :class:`ForkedFeeder`.  An input stream can be
-distributed to a :class:`ThreadPool` or :class:`ProcessPool` -- both with
-multiple workers running a stream processor. An :class:`Executor` provides
-fine-grained job control over such pool.  Concurrent streams from multiple
-threads or processes can be accumulated using a :class:`PCollector` or
-:class:`QCollector` -- or if they are sorted and only needs merging, using
+distributed to a :class:`ThreadPool` or :class:`ProcessPool` -- both use
+multiple workers to process the input simultaneously.  An :class:`Executor`
+provides fine-grained job control over such worker pool.  Concurrent streams
+can be accumulated into a single output using a :class:`PCollector` or
+:class:`QCollector` -- or if they are already sorted and needs merging, using a
 :class:`PSorter` or :class:`QSorter`.  
+
 
 Generators
 ----------
@@ -53,24 +54,28 @@ Generators
 .. function:: seq([start=0, step=1])
 
     An arithmetic sequence generator.
+
     Works with any type with ``+`` defined.
-    
+
     >>> seq(1, 0.25) >> item[:10]
     [1, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25]
 
 .. function:: gseq(ratio[, initval=1])
-   
+
    A geometric sequence generator.
+
    Works with any type with ``*`` defined.
 
    >>> from decimal import Decimal
    >>> gseq(Decimal('.2')) >> item[:4]
    [1, Decimal('0.2'), Decimal('0.04'), Decimal('0.008')]
 
-.. function:: repeatcall(func[, \*args])
-   
-   Repeatedly call `func(\*args)` and yield the result.
-   Useful when `func(\*args)` returns different results, esp. randomly.
+.. function:: repeatcall(func[, \*args, \*\*kwargs])
+
+   Repeatedly call `func(\*args, \*\*kwargs)` and yield the result.
+
+   Useful when `func(\*args, \*\*kwargs)` returns different results, esp.
+   randomly.
 
 .. function:: chaincall(func, initval)
 
@@ -80,7 +85,7 @@ Generators
 Processors
 ----------
 
-All processors take an iterable or a :class:`Stream` instance, and return a
+All processors take an iterable or a :class:`Stream` instance and return a
 :class:`Stream` instance.
 
 .. function:: take(n)
@@ -94,11 +99,13 @@ All processors take an iterable or a :class:`Stream` instance, and return a
 .. function:: takei(indices)
 
    Take elements of the input stream by index.
+
    `indices` should be an iterable over the list of indices to be taken.
 
 .. function:: dropi(indices)
 
    Drop elements of the input stream by index.
+
    `indices` should be an iterable over the list of indices to be dropped.
 
 .. function:: chop(n)
@@ -115,14 +122,14 @@ All processors take an iterable or a :class:`Stream` instance, and return a
    >>> [range(10), range(10, 20)] >> cut[::2] >> list
    [[0, 2, 4, 6, 8], [10, 12, 14, 16, 18]]
 
-   See also: :data:`item`, which slice input stream as a whole.
+   See also: :data:`item`, which slices the input stream as a whole.
 
 .. data:: flatten
 
-   Flatten a nested stream of arbitrary depth (non-recursive implementation).
+   Flatten a nested stream of arbitrary depth.
 
-	>>> (xrange(i) for i in seq(step=3)) >> flatten >> item[:18]
-	[0, 1, 2, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6, 7, 8]
+   >>> (xrange(i) for i in seq(step=3)) >> flatten >> item[:18]
+   [0, 1, 2, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 4, 5, 6, 7, 8]
 
 .. function:: filter(function)
 
@@ -213,7 +220,7 @@ Accumulators
    >>> xrange(20) >> item[::-2]
    [19, 17, 15, 13, 11, 9, 7, 5, 3, 1]
    
-   See also: :data:`cut`, which slice each input stream element individually.
+   See also: :data:`cut`, which slices each stream element individually.
 
 .. function:: maximum(key=function)
 
@@ -242,7 +249,8 @@ Parallelization
 
 Not only is it possible to parallelize all parts of linear pipelines, the
 primitives provided here should make it easy to implement many parallel
-processing patterns: fan-in, fan-out, many-to-many map/reduce, etc.
+processing patterns: multiple producers --- single consumer,
+single producer --- multiple consumers, many--to--many map/reduce, etc.
 
 
 Feeders
@@ -254,14 +262,7 @@ feeder will start a thread or a process to run the producer and feed generated
 items back to the pipeline, thus minimizing the time that the whole pipeline has
 to wait when the producer is blocking in system calls.
 
-In both case, the feeder object is an iterable that is safe to use by many threads.
-
-
-.. class:: ThreadedFeeder(generator[, \*args, \*\*kwargs])
-   
-   Create a feeder that run the given generator with `\*args` and `\*\*kwargs`
-   in a separate thread.  The feeder will act as an eagerly evaluating proxy of
-   the generator.
+In both case, a feeder object is an iterable that is safe to use by many threads.
 
 
 .. class:: ForkedFeeder(generator[, \*args, \*\*kwargs])
@@ -271,30 +272,40 @@ In both case, the feeder object is an iterable that is safe to use by many threa
    the generator.
 
 
-Asynchronous Pool
-^^^^^^^^^^^^^^^^^
+.. class:: ThreadedFeeder(generator[, \*args, \*\*kwargs])
+   
+   Create a feeder that run the given generator with `\*args` and `\*\*kwargs`
+   in a separate thread.  The feeder will act as an eagerly evaluating proxy of
+   the generator.
+
+
+Pools of workers
+^^^^^^^^^^^^^^^^
 
 If the order of output does not matter given an input stream, a
 :class:`ThreadPool` or :class:`ProcessPool` can be used to speed up the task.
 They both utilize a number of workers in other threads or processes to work on
 items pulled from the input stream asynchronously.
 
-A pool instance is a :class:`Stream` object and thus is pipeable and can be
-iterable to get the output values.  The returned iterator behaves as follow:
-their :func:`next` calls return as soon as a next output value is available, or
-raise :exc:`StopIteration` if there is no more output.
+An instantiated pool object is an iterable derived from :class:`Stream` and
+represents the output values. The returned iterator behaves as follow: their
+:func:`next` calls return as soon as a next output value is available, or raise
+:exc:`StopIteration` if there is no more output.  A pool object can also be
+futher piped.
  
 If an input `value` causes an :exc:`Exception` to be raised in the worker
 thread/process, the tuple `(value, exception)` is put into the pool's
 `failqueue`.  The attribute `failure` is a thead-safe iterator over the
 `failqueue`.
 
+A pool with one worker's output values synchronously in the order of input.
+
 
 .. class:: ProcessPool(function[, poolsize, args=[], kwargs={}])
 
    Distribute a stream processing `function` to a pool of worker threads.
    
-   :param function: an iterator-processing function, one that takes an iterator and return an iterator.
+   :param function: an iterator-processing function, one that takes an iterator and returns an iterator.
    :param poolsize: the number of worker processes, default to the number of CPUs.
    
    >>> range(10) >> ProcessPool(map(lambda x: x*x)) >> sum
@@ -305,7 +316,7 @@ thread/process, the tuple `(value, exception)` is put into the pool's
 
    Distribute a stream processing `function` to a pool of worker threads.
 
-   :param function: an iterator-processing function, one that takes an iterator and return an iterator.
+   :param function: an iterator-processing function, one that takes an iterator and returns an iterator.
    :param poolsize: the number of worker threads, default to the number of CPUs.
    
    >>> range(10) >> ThreadPool(map(lambda x: x*x)) >> sum
@@ -324,7 +335,7 @@ job control over a thread/process pool.
    API for job submission and cancellation.
 
    :param poolclass: either :class:`ThreadPool` or :class:`ProcessPool`.
-   :param function: an iterator-processing function, one that takes an iterator and return an iterator.
+   :param function: an iterator-processing function, one that takes an iterator and returns an iterator.
    :param poolsize: the number of workers, default to the number of CPUs.
 
    :attribute result: an iterator over the result
@@ -362,7 +373,7 @@ job control over a thread/process pool.
       Signal that the executor will no longer accept job submission.
     
       Worker threads/processes will be allowed to terminate after all jobs have
-      been are completed.  Without a call to :func:`close`, they will stay around
+      been completed.  Without a call to :func:`close`, they will stay around
       forever waiting for more jobs to come.
 
    .. method:: shutdown()
@@ -370,7 +381,7 @@ job control over a thread/process pool.
       Shut down the Executor.  Suspend all waiting jobs.
     
       Running workers will terminate after finishing their current job items.
-      The call will block until all workers are terminated.
+      The call will block until all workers die.
 
 
 Mergers
@@ -385,15 +396,18 @@ available.  PCollectors can collect from :class:`ForkedFeeder`'s or
 :class:`PSorter` and :class:`QSorter` are also collectors, but given multiples
 sorted input streams (low to high), a Sorter will output items in sorted order.
 
+All merger objects are iterables derived from :class:`Stream` and
+represent the output values.  They can also be further piped.
+
 
 .. class:: PCollector([waittime=0.1])
 
    Collect items from many :class:`ForkedFeeder`'s or :class:`ProcessPool`'s.
 
    .. note:: On POSIX systems, PCollector uses the :manpage:`select(2)` system
-      call.  On Windows, PCollector has to poll each input pipe individually and
-      if none is ready, it goes to sleep for a fix duration given by the
-      parameter `waittime` (default to 0.1s).
+      call and does not understand the `waittime` parameter.  On Windows,
+      PCollector has to poll each input pipe individually and if none is ready,
+      it goes to sleep for a fix duration given by `waittime` (default to 0.1s).
 
 
 .. class:: QCollector([waittime=0.1])
@@ -411,15 +425,6 @@ sorted input streams (low to high), a Sorter will output items in sorted order.
 
    Piping to a PSorter registers the input stream as a source to be sorted.
 
-   .. method:: start()
-
-      Indicate that all input sources has been identified then start a thread to
-      collect and merge-sort them.
-
-   .. method:: join()
-
-      Wait for the sorter thread to terminate.
-
 
 .. class:: QSorter()
 
@@ -428,21 +433,14 @@ sorted input streams (low to high), a Sorter will output items in sorted order.
 
    Piping to a QSorter registers the input stream as a source to be sorted.
 
-   .. method:: start()
-
-      Indicate that all input sources has been identified then start a thread to
-      collect and merge-sort them.
-
-   .. method:: join()
-
-      Wait for the sorter thread to terminate.
-
 
 How it works
 ------------
 
 :class:`Stream` is the base class of most others in the module.  A Stream object
-is both a lazy list of items and an iterator-processing function.
+is both a lazy list of items and an iterator-processing function.  A Stream
+processor when instantiated usually represents an empty iterator which will
+be replaced when an input stream is piped into it.
 
 
 .. class:: Stream(iterable)
@@ -462,21 +460,21 @@ is both a lazy list of items and an iterator-processing function.
    The ``>>`` operator works as follow: the expression ``a >> b`` means
    ``b.__pipe__(a) if hasattr(b, '__pipe__') else b(a)``.
 
-   .. method:: __call__(iterator)
+   .. method:: __call__(self, iterator)
 
       An iterator-processing function, one that takes an iterator
       and returns an iterator.
-   
+
       The default behavior is to chain `iterator` with `self.iterator`,
       in effect append `self` to the input stream in.
-      
+
       >>> [1, 2, 3] >> Stream([4, 5, 6]) >> list
       [1, 2, 3, 4, 5, 6]
 
-   .. method:: __pipe__(inpipe)
-   
-      Defines the connection mechanism between `self` and `inpipe`.  
-     
+   .. method:: __pipe__(self, inpipe)
+
+      Defines the connection mechanism between `self` and `inpipe`.
+
       By default, it replaces `self.iterator` with the one returned by
       ``self.__call__(iter(inpipe))``.
 

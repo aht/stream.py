@@ -355,15 +355,15 @@ class dropi(Stream):
 # Process streams with functions and higher-order ones
 
 
-class Filter(Stream):
+class Processor(Stream):
 	"""A decorator to turn an iterator-processing function into
-	a Stream filter.
+	a Stream processor object.
 	"""
 	def __init__(self, function):
 		"""function: an iterator-processing function, one that takes an
 		iterator and return an iterator
 		"""
-		super(Filter, self).__init__()
+		super(Processor, self).__init__()
 		self.function = function
 	
 	def __call__(self, iterator):
@@ -1155,16 +1155,11 @@ class PSorter(Stream):
 	def __init__(self):
 		self.inpipes = []
 
-	def start(self):
-		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(_iterrecv, self.inpipes))
-		self.sorter_thread = sorter.thread
-		self.iterator = iter(sorter)
+	def __iter__(self):
+		return heapq.merge(*__builtin__.map(_iterrecv, self.inpipes))
 	
 	def __pipe__(self, inpipe):
 		self.inpipes.append(inpipe.outpipe)
-		
-	def join(self):
-		self.sorter_thread.join()
 
 	def __repr__(self):
 		return '<PSorter at %s>' % hex(id(self))
@@ -1177,16 +1172,11 @@ class QSorter(Stream):
 	def __init__(self):
 		self.inqueues = []
 
-	def start(self):
-		sorter = ThreadedFeeder(heapq.merge, *__builtin__.map(_iterqueue, self.inqueues))
-		self.sorter_thread = sorter.thread
-		self.iterator = iter(sorter)
+	def __iter__(self):
+		return heapq.merge(*__builtin__.map(_iterqueue, self.inqueues))
 	
 	def __pipe__(self, inpipe):
 		self.inqueues.append(inpipe.outqueue)
-	
-	def join(self):
-		self.sorter_thread.join()
 	
 	def __repr__(self):
 		return '<PSorter at %s>' % hex(id(self))

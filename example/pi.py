@@ -4,7 +4,7 @@
 import operator
 
 from decimal import Decimal, getcontext
-from stream import Stream, Filter, seq, gseq, apply, map, fold, zip, item, drop
+from stream import Stream, Processor, seq, gseq, apply, map, fold, zip, item, drop
 
 """
 Compute digits of pi using the Gregory series, and its accelerated variants.
@@ -31,7 +31,7 @@ def Gregory(type=float):
 series1 = Gregory()
 
 
-@Filter
+@Processor
 def Aitken(s):
 	"""Accelerate the convergence of the a series
 	using Aitken's delta-squared process (SCIP calls it Euler).

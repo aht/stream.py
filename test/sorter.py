@@ -11,17 +11,13 @@ def test_PSorter():
 	sorter = PSorter()
 	ForkedFeeder(lambda: iter(xrange(10))) >> sorter
 	ForkedFeeder(lambda: iter(xrange(0, 20, 2))) >> sorter
-	sorter.start()
 	assert sorter >> list == [0, 0, 1, 2, 2, 3, 4, 4, 5, 6, 6, 7, 8, 8, 9, 10, 12, 14, 16, 18]
-	sorter.join()
 
 def test_QSorter():
 	sorter = QSorter()
 	ThreadedFeeder(lambda: iter(xrange(10))) >> sorter
 	ThreadedFeeder(lambda: iter(xrange(0, 20, 2))) >> sorter
-	sorter.start()
 	assert sorter >> list == [0, 0, 1, 2, 2, 3, 4, 4, 5, 6, 6, 7, 8, 8, 9, 10, 12, 14, 16, 18]
-	sorter.join()
 
 
 if __name__ == '__main__':

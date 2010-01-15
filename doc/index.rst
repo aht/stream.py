@@ -6,7 +6,7 @@
 .. moduleauthor:: Anh Hai Trinh <anh.hai.trinh@gmail.com>
 
 
-Streams are iterators with a pipelining mechanism to enable data-flow
+Streams are iterables with a pipelining mechanism to enable data-flow
 programming and easy parallelization.
 
 The idea is to take the output of a function that turns an iterable into
@@ -298,7 +298,7 @@ thread/process, the tuple `(value, exception)` is put into the pool's
 `failqueue`.  The attribute `failure` is a thead-safe iterator over the
 `failqueue`.
 
-A pool with one worker's output values synchronously in the order of input.
+A pool with one worker outputs values synchronously in the order of input.
 
 
 .. class:: ProcessPool(function[, poolsize, args=[], kwargs={}])
@@ -555,3 +555,11 @@ pages:
          print '%r is %d bytes' % (url, len(content))
       for url, exception in retrieved.failure:
          print '%r failed: %s' % (url, exception)
+
+Resources
+---------
+
+The code repository is located at <http://github.com/aht/stream.py>.
+
+Articles written by the author can be retrieved from
+<http://blog.onideas.ws/tag/project:stream.py>.

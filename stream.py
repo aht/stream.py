@@ -1,9 +1,9 @@
-"""Lazily-evaluated stream with pipelining and parallelization.
+"""Lazily-evaluated, parallelizable pipeline.
 
 Overview
 ========
 
-Streams are generalized iterators with a pipelining mechanism to enable
+Streams are iterables with a pipelining mechanism to enable
 data-flow programming and easy parallelization.
 
 The idea is to take the output of a function that turn an iterable into
@@ -734,10 +734,6 @@ class ThreadPool(Stream):
 	exception) is put into the pool's `failqueue`.  The attribute
 	`failure` is a thead-safe iterator over the `failqueue`.
 	
-	An alternate way to use ThreadPool is to instantiate it, then submit
-	jobs to its `inqueue` concurrently, using StopIteration to mark the end.
-	This would be necessary if failed jobs need to be resubmitted.
-	
 	See also: Executor
 	"""
 	def __init__(self, function, poolsize=_nCPU, args=[], kwargs={}):
@@ -809,10 +805,6 @@ class ProcessPool(Stream):
 	input value causes an Exception to be raised, the tuple (value,
 	exception) is put into the pool's `failqueue`.  The attribute
 	`failure` is a thead-safe iterator over the `failqueue`.
-
-	An alternate way to use ProcessPool is to instantiate it, then submit
-	jobs to its `inqueue` concurrently, using StopIteration to mark the end.
-	This would be necessary if failed jobs need to be resubmitted.
 	
 	See also: Executor
 	"""

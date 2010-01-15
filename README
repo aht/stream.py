@@ -1,14 +1,16 @@
 ABOUT
 =====
 
-Streams are generalized iterables with a pipelining mechanism via the
-'>>' operator to enable data-flow programming.
+Streams are iterables with a pipelining mechanism to enable data-flow
+programming and easy parallelization.
 
-This module requires Python 2.6.
+See the reference documentation at <http://www.trinhhaianh.com/stream.py>.
 
 
 INSTALL
 =======
+
+This module requires Python 2.6.
 
 To install system-wide:
 
@@ -17,15 +19,3 @@ To install system-wide:
 or if you just need it in a project:
 
     $ cp ./stream.py ~/your/project
-
-
-To make sure it works with your Python version, run all doctests:
-
-    $ python ./stream.py -v
-
-
-DOCUMENTATION
-=============
-
-./stream.py is well-documented with plenty of short and long examples.
-

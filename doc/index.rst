@@ -18,7 +18,8 @@ This approach focuses the programming on processing streams of data, step
 by step.  A pipeline usually starts with a producer, then passes through
 a number of processors.  Multiple streams can be branched and combined.
 Finally, the output is fed to an accumulator, which can be any function
-of one iterable argument.
+of one iterable argument.  The paradigm is very much inspired by this chapter
+from the wizard book: <http://mitpress.mit.edu/sicp/full-text/sicp/book/node69.html>.
 
 **Producers**:  anything iterable
 	+ from this module: :func:`seq`, :func:`gseq`, :func:`repeatcall`, :func:`chaincall`

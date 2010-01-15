@@ -4,3 +4,6 @@ setup.py
 stream.py
 example/feeder.py
 example/pi.py
+example/randwalk.py
+example/retrieve_urls.py
+example/wfc.py

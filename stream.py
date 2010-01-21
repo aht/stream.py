@@ -773,9 +773,7 @@ class ThreadPool(Stream):
 			self.closed = True
 		self.cleaner_thread = threading.Thread(target=cleanup)
 		self.cleaner_thread.start()
-	
-	def __iter__(self):
-		return _iterqueue(self.outqueue)
+		self.iterator = _iterqueue(self.outqueue)
 	
 	def __call__(self, inpipe):
 		if self.closed:
@@ -787,6 +785,7 @@ class ThreadPool(Stream):
 			self.inqueue.put(StopIteration)
 		self.feeder_thread = threading.Thread(target=feed)
 		self.feeder_thread.start()
+		return self.iterator
 	
 	def join(self):
 		self.cleaner_thread.join()
@@ -846,9 +845,7 @@ class ProcessPool(Stream):
 			self.closed = True
 		self.cleaner_thread = threading.Thread(target=cleanup)
 		self.cleaner_thread.start()
-	
-	def __iter__(self):
-		return _iterqueue(self.outqueue)
+		self.iterator = _iterqueue(self.outqueue)
 	
 	def __call__(self, inpipe):
 		if self.closed:
@@ -860,6 +857,7 @@ class ProcessPool(Stream):
 			self.inqueue.put(StopIteration)
 		self.feeder_thread = threading.Thread(target=feed)
 		self.feeder_thread.start()
+		return self.iterator
 	
 	def join(self):
 		self.cleaner_thread.join()

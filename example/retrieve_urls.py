@@ -17,12 +17,12 @@ URLs = [
 	'http://news.ycombinator.com/',
 ]
 
-def retrieve(urls, timeout=10):
+def retrieve(urls, timeout=30):
 	for url in urls:
 		yield url, urllib2.urlopen(url, timeout=timeout).read()
 
 if __name__ == '__main__':
-	retrieved = URLs >> ThreadPool(retrieve, poolsize=len(URLs))
+	retrieved = URLs >> ThreadPool(retrieve, poolsize=4)
 	for url, content in retrieved:
 		print '%r is %d bytes' % (url, len(content))
 	for url, exception in retrieved.failure:

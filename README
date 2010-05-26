@@ -4,7 +4,7 @@ ABOUT
 Streams are iterables with a pipelining mechanism to enable data-flow
 programming and easy parallelization.
 
-See the reference documentation at <http://www.trinhhaianh.com/stream.py>.
+See the reference documentation at http://www.trinhhaianh.com/stream.py
 
 
 INSTALL

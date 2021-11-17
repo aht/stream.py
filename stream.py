@@ -48,12 +48,12 @@ blocking in system calls.
 If the order of processing does not matter, an ThreadPool or ProcessPool
 can be used.  They both utilize a number of workers in other theads
 or processes to work on items pulled from the input stream.  Their output
-are simply iterables respresented by the pool objects which can be used in
+are simply iterables represented by the pool objects which can be used in
 pipelines.  Alternatively, an Executor can perform fine-grained, concurrent job
 control over a thread/process pool.
 
 Multiple streams can be piped to a single PCollector or QCollector, which
-will gather generated items whenever they are avaiable.  PCollectors
+will gather generated items whenever they are available.  PCollectors
 can collect from ForkedFeeder's or ProcessPool's (via system pipes) and
 QCollector's can collect from ThreadedFeeder's and ThreadPool's (via queues).
 PSorter and QSorter are also collectors, but given multiples sorted input
@@ -201,7 +201,7 @@ class Stream(Iterable):
 
 
 class take(Stream):
-	"""Take the firts n items of the input stream, return a Stream.
+	"""Take the first n items of the input stream, return a Stream.
 	
 	>>> seq(1, 2) >> take(10)
 	Stream([1, 3, 5, 7, 9, 11, 13, 15, 17, 19])

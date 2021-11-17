@@ -292,7 +292,7 @@ An instantiated pool object is an iterable derived from :class:`Stream` and
 represents the output values. The returned iterator behaves as follow: their
 :func:`next` calls return as soon as a next output value is available, or raise
 :exc:`StopIteration` if there is no more output.  A pool object can also be
-futher piped.
+further piped.
  
 If an input `value` causes an :exc:`Exception` to be raised in the worker
 thread/process, the tuple `(value, exception)` is put into the pool's
